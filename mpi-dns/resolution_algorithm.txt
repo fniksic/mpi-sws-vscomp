@@ -1,0 +1,208 @@
+Description of the resolution algorithm.
+
+This algorithm is based on section 4.3.2 in RFC 1034, adapted to ignore everything
+about recursively-obtained data.
+
+First of all, for reference, the original algorithm with comments:
+
+--- snip ---
+
+The actual algorithm used by the name server will depend on the local OS
+and data structures used to store RRs.  The following algorithm assumes
+that the RRs are organized in several tree structures, one for each
+zone, and another for the cache:
+
+   1. Set or clear the value of recursion available in the response
+      depending on whether the name server is willing to provide
+      recursive service.  If recursive service is available and
+      requested via the RD bit in the query, go to step 5,
+      otherwise step 2.
+
+      JK: Since we do not provide recursion, we always go to step 2 regardless
+      of the RD bit.
+        
+   2. Search the available zones for the zone which is the nearest
+      ancestor to QNAME.  If such a zone is found, go to step 3,
+      otherwise step 4.
+
+      JK: This step is intertwined with step 3, below. In cases where we would
+      go to step 4, we skip ahead to step 6, since step 4 is essentially a no-op
+      in our case.
+      
+   3. Start matching down, label by label, in the zone.  The
+      matching process can terminate several ways:
+
+         a. If the whole of QNAME is matched, we have found the
+            node.
+
+            If the data at the node is a CNAME, and QTYPE doesn't
+            match CNAME, copy the CNAME RR into the answer section
+            of the response, change QNAME to the canonical name in      
+            the CNAME RR, and go back to step 1.
+
+            JK: The additional data to be provided by this step is pre-calculated
+            using the query-resolution algorithm for each CNAME.
+            
+            Otherwise, copy all RRs which match QTYPE into the
+            answer section and go to step 6.
+
+         b. If a match would take us out of the authoritative data,
+            we have a referral.  This happens when we encounter a
+            node with NS RRs marking cuts along the bottom of a
+            zone.
+
+            Copy the NS RRs for the subzone into the authority
+            section of the reply.  Put whatever addresses are
+            available into the additional section, using glue RRs
+            if the addresses are not available from authoritative
+            data or the cache.  Go to step 4.
+            
+            JK: Since step 4 is essentially a no-op in our case, go to step 6 here.
+
+         c. If at some label, a match is impossible (i.e., the
+            corresponding label does not exist), look to see if a
+            the "*" label exists.
+
+            If the "*" label does not exist, check whether the name
+            we are looking for is the original QNAME in the query
+            or a name we have followed due to a CNAME.  If the name
+            is original, set an authoritative name error in the
+            response and exit.  Otherwise just exit.
+
+            If the "*" label does exist, match RRs at that node
+            against QTYPE.  If any match, copy them into the answer
+            section, but set the owner of the RR to be QNAME, and
+            not the node with the "*" label.  Go to step 6.
+
+   4. Start matching down in the cache.  If QNAME is found in the
+      cache, copy all RRs attached to it that match QTYPE into the
+      answer section.  If there was no delegation from
+      authoritative data, look for the best one from the cache, and
+      put it in the authority section.  Go to step 6.
+      
+      JK: This step can be removed in our case.
+
+   5. Using the local resolver or a copy of its algorithm (see
+      resolver section of this memo) to answer the query.  Store
+      the results, including any intermediate CNAMEs, in the answer
+      section of the response.
+
+      JK: This step can be removed in our case.
+      
+   6. Using local data only, attempt to add other RRs which may be
+      useful to the additional section of the query.  Exit.
+
+      JK: There shouldn't be too much to add here.
+        
+--- snip ---
+
+Now, here's the cut-down version:
+
+1. Start traversing the answer tree. If the root node is marked as "authoritative",
+   go to step 2, else to step 3.
+
+2. If the current node is authoritative, there are several cases:
+
+   a. If the path to the current node matches the FQDN, go to step 4.
+   b. If we can descend one step in the tree with the path to the new node
+      forming a prefix of the FQDN, go to step 2 if the next node is authoritative,
+      and go to step 5 otherwise.
+   c. If we cannot descend as in b, but a wildcard record exists, go to step 6.
+   d. Return "no information found (authoritative)"
+
+3. If the current node is not authoritative, there are three cases:
+
+   a. If the path to current node matches the FQDN, go to step 7.
+   b. If we can descend one step in the tree with the path to the new node
+      forming a prefix of the FQDN, go to step 2 if the next node is authoritative,
+      and go to step 3 otherwise.
+   c. If we cannot descend as in b, return "no information found".
+
+4. Several cases, depending on query type and whether the node has a CNAME.
+
+   a. If the query type is "ANY", return all RRs immediately associated with the node;
+      the answer is authoritative.
+   b. If the query type is "CNAME", return all CNAME RRs immediately associated with
+      the node; the answer is authoritative.
+   c. If the node has no CNAME, return all RRs associated with the node.
+   d. If the node has CNAMES, return all RRs associated with the node, and
+      recursively associated with the CNAMEs.
+
+5. Return the NS records associated with the current FQDN prefix, as well as any A records
+   associated with them; put all this in the "authority" section.
+
+6. Return all data associated with the wildcard record.
+
+7. Return the data associated with the record (non-authoritative)
+   or "no data (non-authoritative)".
+
+Two kinds of records definitely need links to other data: CNAME and NS. This is
+implemented in AnswerTree.scala.
+
+Possible specification:
+
+Given an AnswerTree A and a FQDN F,
+the *containing zone* of F in A is the maximal prefix P of F such that A[P] has an SOA
+record.
+
+Given an AnswerTree A and a FQDN F,
+an FQDN F is *authoritative* if: the containing zone of F is P and
+for all L that are prefixes of F that strictly contains P, A[L] has no NS record.
+
+Given an AnswerTree A and a FQDN F,
+the *zone* of F in A is the containing zone of F in A if F is authoritative in A,
+and "unknown" otherwise.
+
+Given an AnswerTree A and a FQDN F,
+1. If F is not authoritative in A and P is a maximal prefix of F such that A[P] has an
+  NS record, the NS records of A[P] are to be returned in the authoritative section and
+  for every NS record N of A[P], all A records in A[N] are to be returned in the additional
+  section.
+2. If F is authoritative in A, A[F] exists and contains no CNAMEs, the
+  appropriate RRs of A[F] are to be returned in the answer section.
+3. If F is authoritative in A and A[F] contains a single CNAME pointing to C, and the query
+  is neither CNAME nor ANY, the answer for C is to be computed as ans, the
+  CNAME entry is to be added to ans, and return ans. (multiple CNAMEs are ruled out by
+  RFC 2181).
+4. If F is authoritative in A, Z is the zone of F and there is a P such that Z is a prefix
+  of P and P is a prefix of F such that *.P exists, return the appropriate RRs for
+  A[*.P].
+5. If F is authoritative in A and A[F] contains a single CNAME pointing to C,
+  and the query is either CNAME or ANY, the answer is A[F].
+6. If F is authoritative in A and A[F] does not exist, nor does 4 apply, return NXDOMAIN.
+7. If F is not authoritative in A and (1) does not apply, return no answer.
+
+Case 1: F authoritative in A
+  Case 1.1: F authoritative, A[F] exists
+    Case 1.1.1: F authoritative, A[F] exists, no CNAME -> 2
+    Case 1.1.2: F authoritative, A[F] exists, CNAME
+      Case 1.1.2.1: F authoritative, A[F] exists, CNAME, no CNAME/ANY query -> 3
+      Case 1.1.2.2: F authoritative, A[F] exists, CNAME, CNAME/ANY query -> 5
+  Case 1.2: F authoritative, A[F] does not exist
+    Case 1.2.1: F authoritative, A[F] does not exist, wildcard available -> 4
+    Case 1.2.2: F authoritative, A[F] does not exist, no wildcard available -> 6 
+Case 2: F not authoritative in A
+  Case 2.1: F not authoritative in A, delegation known -> 1
+  Case 2.2: F not authoritative in A, delegation not known -> 7
+ 
+Validity constraints for zone files
+
+We define validity constraints inductively.
+Given a well-formed plain tree A, adding F:R to A must respect the following constraints:
+Uniqueness constraints:
+1. If R is SOA, then A[F] must not have an SOA or CNAME record.
+2. If R is CNAME, then A[F] must be empty.
+3. If R is any other type, then A[F] must not contain a CNAME record.
+Cycle-freeness:
+4. If R is CNAME C, then C must (recursively) point to a non-CNAME record or outside
+  the zones of F.
+5. If R is SOA, then A must not contain CNAMEs that point to a name N of which F is
+  a prefix (constructive cycle-freeness!)
+Glue:
+6. If R is NS N, then N must either point to a name outside of F or N must have an
+  A record.
+7. If R is SOA, then F must not contain NS records that point to a name N of which N
+  is a suffix (constructive glue).
+Authoritative or glue only
+8. If R is of any type but SOA, F must be authoriative in A *or* there must be an NS
+  record F': NS F in A.
