@@ -36,6 +36,17 @@ case class RR_CNAME(ttl: Int, fqdn: Name, child_records: List[(Name, RR)]) exten
     val (superForest, superData) = super.compress(forest, data)
     Compression.updateWithUnknownLength(superForest, superData, Compression.addNameToForest(fqdn.fqdn))
   }
+  def flatten_extra: List[(Name, RR)] = {
+    def do_flatten (crs: List[(Name, RR)], cr: (Name, RR)): List[(Name, RR)] = {
+      val (n, rr) = cr
+      return (rr match {
+        case RR_CNAME(_, _, extra) =>
+          (n, rr) :: rr.asInstanceOf[RR_CNAME].flatten_extra ++ crs
+        case _ => (n, rr) :: crs
+      })
+    }
+    return child_records.foldLeft(List[(Name, RR)]())(do_flatten)
+  }
 }
 
 case class RR_SOA(ttl: Int, fqdn: Name, hostmaster: Name, serial: Long,
