@@ -13,6 +13,7 @@ import mpidns.data.EmptyPlainTree
 import mpidns.data.PlainTree
 import mpidns.data.PlainRR
 import mpidns.data.Name
+import mpidns.data.Compression
 
 object DNSServer {
 
@@ -54,7 +55,7 @@ object DNSServer {
     val query_packet = new DatagramPacket(query_buffer, BUFFER_SIZE)
 
     MSG("DNS Server now listing on port: " + PORT)
-    /*while (true) {      
+    while (true) {      
       // listen for incoming DNS queries
       sock.receive(query_packet)
       MSG("Request received from (" + query_packet.getAddress().toString.substring(1) + ")")
@@ -64,12 +65,12 @@ object DNSServer {
       val response_msg = resolver.resolve(query_msg)
       
       //TODO: encode response message into response_buffer
-      val response_buffer = null
+      val response_buffer = Compression.messageToBytes(response_msg)
       val response_packet = new DatagramPacket(response_buffer, BUFFER_SIZE)
       response_packet.setSocketAddress(response_packet.getSocketAddress())
       sock.send(response_packet)
       MSG("Anwser sent back to (" + response_packet.getAddress().toString.substring(1) + ")")
-    }*/
+    }
   }
 
   // debugging only  
