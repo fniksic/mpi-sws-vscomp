@@ -5,9 +5,8 @@ import scala.collection.immutable.Stack
 import scala.collection.immutable.Set
 import scala.Either.LeftProjection
 import scala.collection.immutable.Queue
-import gov.nasa.jpf.jvm.Verify
 
-sealed abstract class RR(val ttl: Int, val recType: RecordType) {
+sealed abstract class RR(ttl: Int, val recType: RecordType) {
   def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
     val recTypeBytes = Compression.int16ToBytes(recType.id)
     val classBytes = Compression.int16ToBytes(1)
@@ -84,111 +83,110 @@ case class RR_TXT(ttl: Int, text: String) extends RR(ttl, TXT()) {
   }
 }
 
-sealed class AnswerTreeNode(Children:Map[String, AnswerTreeNode], Rrs: List[RR],
-    Authoritative: Boolean) {
+sealed class AnswerTreeNode(Children: Map[String, AnswerTreeNode], Rrs: List[RR],
+  Authoritative: Boolean) {
   val children = Children
   val rrs = Rrs
   val authoritative = Authoritative
 }
 
 object Helpers {
-    def is_soa (rr: RR): Boolean = rr match {
-      case RR_SOA(_, _, _, _, _,_, _, _) => return true
-      case _ => return false
-    }
+  def is_soa(rr: RR): Boolean = rr match {
+    case RR_SOA(_, _, _, _, _, _, _, _) => return true
+    case _ => return false
+  }
 
-    def is_ns (rr: RR): Boolean = rr match {
-      case RR_NS(_, _, _) => return true
-      case _ => return false
-    }
+  def is_ns(rr: RR): Boolean = rr match {
+    case RR_NS(_, _, _) => return true
+    case _ => return false
+  }
 
-    def is_p_soa (rr: PlainRR): Boolean = rr match {
-      case PlainRR_SOA(_, _, _, _, _, _,_, _) => return true
-      case _ => return false
-    }
+  def is_p_soa(rr: PlainRR): Boolean = rr match {
+    case PlainRR_SOA(_, _, _, _, _, _, _, _) => return true
+    case _ => return false
+  }
 
-    def is_p_ns (rr: PlainRR): Boolean = rr match {
-      case PlainRR_NS(_, _) => return true
-      case _ => return false
-    }
+  def is_p_ns(rr: PlainRR): Boolean = rr match {
+    case PlainRR_NS(_, _) => return true
+    case _ => return false
+  }
 
-    def is_p_cname (rr: PlainRR): Boolean = rr match {
-      case PlainRR_CNAME(_, _) => return true
-      case _ => return false
-    }
+  def is_p_cname(rr: PlainRR): Boolean = rr match {
+    case PlainRR_CNAME(_, _) => return true
+    case _ => return false
+  }
 }
 sealed class AnswerTree(root: AnswerTreeNode) {
-    val node: AnswerTreeNode = root
-    
-    private def find_node_for (n: Name): Option[AnswerTreeNode] = {
-      var cn = node
-      for (ne <- n.fqdn.reverse) {
-        cn.children.get(ne) match {
-          case None => return None
-          case Some(cn2) => cn = cn2
-        }
+  val node: AnswerTreeNode = root
+
+  private def find_node_for(n: Name): Option[AnswerTreeNode] = {
+    var cn = node
+    for (ne <- n.fqdn.reverse) {
+      cn.children.get(ne) match {
+        case None => return None
+        case Some(cn2) => cn = cn2
       }
-      return new Some(cn)
     }
-    
+    return new Some(cn)
+  }
+
   private def find_maximal_prefix_for(n: Name, p: AnswerTreeNode => Boolean): Option[AnswerTreeNode] = {
-      var last: Option[AnswerTreeNode] = None
-      var cn = node
-      for (ne <- n.fqdn.reverse) {
-        if (p(cn)) last = new Some(cn) 
-        cn.children.get(ne) match {
-          case None => return last
-          case Some(cn2) => cn = cn2
-        }
+    var last: Option[AnswerTreeNode] = None
+    var cn = node
+    for (ne <- n.fqdn.reverse) {
+      if (p(cn)) last = new Some(cn)
+      cn.children.get(ne) match {
+        case None => return last
+        case Some(cn2) => cn = cn2
       }
-      return (if (p(cn)) new Some(cn) else last)      
     }
-    
-    
-    /* Given an AnswerTree A and a FQDN F,
+    return (if (p(cn)) new Some(cn) else last)
+  }
+
+  /* Given an AnswerTree A and a FQDN F,
 	 * the *containing zone* of F in A is the maximal prefix P of F such
 	 * that A[P] has an SOA record.
      */
-    
-    def get_containing_zone(n: Name) =
-      find_maximal_prefix_for (n, (p: AnswerTreeNode) => p.rrs.exists(Helpers.is_soa))
-    
-    /*  Given an AnswerTree A and a FQDN F,
+
+  def get_containing_zone(n: Name) =
+    find_maximal_prefix_for(n, (p: AnswerTreeNode) => p.rrs.exists(Helpers.is_soa))
+
+  /*  Given an AnswerTree A and a FQDN F,
      *  an FQDN F is *authoritative* if: the containing zone of F is P and
      *  for all L that are prefixes of F that strictly contains P, A[L] has no NS record.
      */
-    def is_authoritative(name: Name): Boolean = {
-      var is_auth: Boolean = false
-      var n: AnswerTreeNode = node
-      if (n.rrs.exists(Helpers.is_soa)) is_auth = true
-      for (ne: String <- name.fqdn.reverse) {
-        val chld = n.children.get(ne)
-        chld match {
-          case None => return is_auth
-          case Some(cn) =>
-            n = cn
-            if (n.rrs.exists(Helpers.is_soa)) is_auth = true
-            else if (n.rrs.exists(Helpers.is_ns)) is_auth = false
-        }
+  def is_authoritative(name: Name): Boolean = {
+    var is_auth: Boolean = false
+    var n: AnswerTreeNode = node
+    if (n.rrs.exists(Helpers.is_soa)) is_auth = true
+    for (ne: String <- name.fqdn.reverse) {
+      val chld = n.children.get(ne)
+      chld match {
+        case None => return is_auth
+        case Some(cn) =>
+          n = cn
+          if (n.rrs.exists(Helpers.is_soa)) is_auth = true
+          else if (n.rrs.exists(Helpers.is_ns)) is_auth = false
       }
-      return is_auth
     }
+    return is_auth
+  }
 
-    /* Given an AnswerTree A and a FQDN F,
+  /* Given an AnswerTree A and a FQDN F,
      * the *zone* of F in A is the containing zone of F in A if F is authoritative in A,
      * and "unknown" otherwise.
      */
-    def get_zone(name: Name): Option[AnswerTreeNode] =
-      if (is_authoritative(name)) return get_containing_zone(name)
-      else return None
+  def get_zone(name: Name): Option[AnswerTreeNode] =
+    if (is_authoritative(name)) return get_containing_zone(name)
+    else return None
 
-    /* Get the RRs belonging to a name. This implements A[F] above. */
-    def get_rrs(name: Name): Option[List[RR]] =
-      find_node_for(name) match {
-        case None => return None
-        case Some(node) => return new Some(node.rrs)
-      }
-    
+  /* Get the RRs belonging to a name. This implements A[F] above. */
+  def get_rrs(name: Name): Option[List[RR]] =
+    find_node_for(name) match {
+      case None => return None
+      case Some(node) => return new Some(node.rrs)
+    }
+
 }
 
 sealed abstract class Error(val n: Name) {
@@ -205,9 +203,9 @@ class ErrorNonauthDelegate(n: Name) extends Error(n) { val msg = "Delegation out
 
 object BuildAnswerTree {
   case class Analysis(cname: Map[Name, Name], ns_rhs: Set[Name], mx_rhs: Set[Name],
-      errors: Set[Error])
-  
-  def analysis_dfs (a: Analysis, n: Stack[String], rr: List[PlainRR]): Analysis = {
+    errors: Set[Error])
+
+  def analysis_dfs(a: Analysis, n: Stack[String], rr: List[PlainRR]): Analysis = {
     /* Check 1: A[F] must not contain two SOA records. */
     var new_cname = a.cname
     var new_errs = a.errors
@@ -221,6 +219,7 @@ object BuildAnswerTree {
       println("  " + rrr.toString())
     }
     /* 2. If A[F] contains a CNAME, it must not contain other records. */    
+    /* 2. If A[F] contains a CNAME, it must not contain other records. */
     if (rr.exists(Helpers.is_p_cname)) {
       println("  Found a CNAME, checking (2)")
       if (rr.size > 1) {
@@ -255,7 +254,8 @@ object BuildAnswerTree {
     return new Analysis(new_cname, new_ns, new_mx, new_errs)
   }
   
-  def resolve_cnames(cnames: Map[Name, Name])(plainTree: PlainTree)(progress: Boolean)(defer: List[Name])(todo: List[Name])(done: Set[Name]): Option[Set[Error]] = {
+  def resolve_cnames (cnames: Map[Name, Name]) (plainTree: PlainTree) (progress: Boolean)
+    	(defer: List[Name]) (todo: List[Name]) (done: Set[Name]): Option[Set[Error]] = {
       todo match {
         case scala.collection.immutable.Nil =>
         	defer match {
@@ -286,9 +286,9 @@ object BuildAnswerTree {
          
       }
     }
-
   
-  def map_rr_simple (rr_plain: PlainRR): RR = rr_plain match {
+
+  def map_rr_simple(rr_plain: PlainRR): RR = rr_plain match {
     case PlainRR_A(ttl, addr) => RR_A(ttl, addr)
     case PlainRR_MX(ttl, prio, name) => RR_MX(ttl, prio, name)
     case PlainRR_PTR(ttl, name) => RR_PTR(ttl, name)
@@ -298,33 +298,32 @@ object BuildAnswerTree {
     case _ => throw new AssertionError("unreachable")
   }
 
-  def extract_addrs (l: List[InetAddress], rr: PlainRR): List[InetAddress] = {
-	rr match {
-	  case PlainRR_A(_, addr) => return (addr :: l)
-	  case _ => return l
-	}
+  def extract_addrs(l: List[InetAddress], rr: PlainRR): List[InetAddress] = {
+    rr match {
+      case PlainRR_A(_, addr) => return (addr :: l)
+      case _ => return l
+    }
   }
 
-  def map_rr_ns (plainTree: PlainTree)(rr_plain: PlainRR): RR = rr_plain match {
+  def map_rr_ns(plainTree: PlainTree)(rr_plain: PlainRR): RR = rr_plain match {
     case PlainRR_NS(ttl, name) =>
       val addrs = plainTree.getRR(name) match {
         case Some(rrs) =>
           rrs.foldLeft(List[InetAddress]())(extract_addrs)
-        case None => List[InetAddress]()          
+        case None => List[InetAddress]()
       }
       return RR_NS(ttl, name, addrs)
     case _ => throw new AssertionError("unreachable")
-  }    
+  }
 
-  def extend_map (xfrm: PlainRR => RR) (map: Map[PlainRR, RR]) (plainRRs: Set[PlainRR]): Map[PlainRR, RR] = {
+  def extend_map(xfrm: PlainRR => RR)(map: Map[PlainRR, RR])(plainRRs: Set[PlainRR]): Map[PlainRR, RR] = {
     return plainRRs.foldLeft(map)((map: Map[PlainRR, RR], rr: PlainRR) => map + (rr -> xfrm(rr)))
   }
 
   def map_names(rrmap: Map[PlainRR, RR])(map: Map[Name, List[RR]], prefix: Stack[String], rrs: List[PlainRR]): Map[Name, List[RR]] = {
     rrs match {
       case PlainRR_CNAME(_, _) :: _ => return map
-      case _ =>
-        val mapped_rrs = rrs.map(rrmap)
+      case _ => val mapped_rrs = rrs.map(rrmap)
       	return map + (new Name(prefix.toList) -> mapped_rrs)
     }
   }
@@ -348,12 +347,12 @@ object BuildAnswerTree {
       if (!work.isEmpty)
         return work.head.authoritative
       else
-    	return false
+        return false
     }
     val last = last_atn
   }
-  
-  def build_pre (rr_map: Map[Name, List[RR]]) (s: State, pref: Stack[String], rrs: List[PlainRR]): State = {
+
+  def build_pre(rr_map: Map[Name, List[RR]])(s: State, pref: Stack[String], rrs: List[PlainRR]): State = {
     val auth =
       if (rrs.exists(Helpers.is_p_soa)) true
       else if (rrs.exists(Helpers.is_p_ns)) false
@@ -361,11 +360,12 @@ object BuildAnswerTree {
     return s.push(pref.head, rr_map.get(new Name(pref.toList.reverse)).get, auth)
   }
 
-  def build_post (s: State, pref: Stack[String], rrs: List[PlainRR]): State = {
+  def build_post(s: State, pref: Stack[String], rrs: List[PlainRR]): State = {
     return s.pop
   }
 
-  def rec_sat_cnames(map: Map[Name, List[RR]])(plainTree: PlainTree)(n: Name): Map[Name, List[RR]] = {
+  def rec_sat_cnames (map: Map[Name, List[RR]]) (plainTree: PlainTree) (n: Name):
+	  Map[Name, List[RR]]= {
     println("Getting data for " + n)
     println("  <-" + map)
     println("  -> " + map.get(n))
@@ -449,7 +449,7 @@ object BuildAnswerTree {
       assert(spec_cname_correct(plainTree))
     }
     /* Now, check 5 and 6. */
-    def errmx (name: Name): Error = new ErrorMX(name)
+    def errmx(name: Name): Error = new ErrorMX(name)
     val mx_errs = errs.union(mx_pointees.intersect(cnames.keySet).map(errmx))
     /* SPEC:
      * (a -> b) in cnames <-> PT[a] has CNAME b
@@ -466,7 +466,7 @@ object BuildAnswerTree {
      * err empty <-> PT satisfies 1, 2, 5 (TODO: make it also satisfy 6, 7) 
      */
     /* Collect NS information */
-    def fold_ns (name: Name, data: Map[Name, List[PlainRR]]): Map[Name, List[PlainRR]] = {
+    def fold_ns(name: Name, data: Map[Name, List[PlainRR]]): Map[Name, List[PlainRR]] = {
       plainTree.getRR(name) match {
         case None => data
         case Some(rrs) => data + (name -> rrs)
@@ -577,14 +577,4 @@ object BuildAnswerTree {
     val final_state = plainTree.DFS(build_pre(all_rrs_for_names), build_post, state)
     return new Left(new AnswerTree(final_state.last.get))
   }    
-}
-
-object Test {
-  def main(args: Array[String]) = {
-    val pt:PlainTree = Verify.getObject("mpidns.data.PlainTree").asInstanceOf[PlainTree]
-    BuildAnswerTree.build_answer_tree(pt) match {
-      case Left(_) => println("ok");
-      case Right(_) => println("fail");
-    }
-  }
 }
