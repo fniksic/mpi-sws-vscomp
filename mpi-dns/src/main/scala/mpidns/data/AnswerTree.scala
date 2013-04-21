@@ -31,7 +31,7 @@ case class RR_NS(ttl: Int, fqdn: Name, addrs: List[InetAddress]) extends RR(ttl,
   }
 }
 
-case class RR_CNAME(ttl: Int, fqdn: Name, child_records: List[RR]) extends RR(ttl, CNAME) {
+case class RR_CNAME(ttl: Int, fqdn: Name, child_records: List[(Name, RR)]) extends RR(ttl, CNAME) {
   override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
     val (superForest, superData) = super.compress(forest, data)
     Compression.updateWithUnknownLength(superForest, superData, Compression.addNameToForest(fqdn.fqdn))
@@ -371,7 +371,8 @@ object BuildAnswerTree {
     return s.pop
   }
 
-  def rec_sat_cnames (map: Map[Name, List[RR]]) (plainTree: PlainTree) (n: Name):
+  def rec_sat_cnames (map: Map[Name, List[RR]]) 
+  	  (plainTree: PlainTree) (n: Name):
 	  Map[Name, List[RR]]= {
     println("Getting data for " + n)
     println("  <-" + map)
@@ -382,7 +383,7 @@ object BuildAnswerTree {
       case _ => return map 
     }
     val finished_map = rec_sat_cnames(map)(plainTree)(point_to)
-    val cname_rec = RR_CNAME(ttl, point_to, map.get(point_to).get)
+    val cname_rec = RR_CNAME(ttl, point_to, map.get(point_to).get.map(rr => (point_to, rr)))
     return (finished_map + (n -> List(cname_rec)))
   }
   def saturate_cnames(map: Map[Name, List[RR]], plainTree: PlainTree, todo: Set[Name]): Map[Name, List[RR]] = {
