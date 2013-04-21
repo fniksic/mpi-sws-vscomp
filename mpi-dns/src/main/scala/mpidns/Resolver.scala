@@ -24,6 +24,8 @@ import mpidns.data.PlainRR_A
 import mpidns.data.PlainRR_MX
 import mpidns.data.PlainRR_PTR
 import mpidns.data.PlainRR_TXT
+import mpidns.data.RR_A
+import scala.collection.immutable.Nil
 
 class Resolver(ans_tree: AnswerTree) {
   
@@ -49,17 +51,31 @@ class Resolver(ans_tree: AnswerTree) {
     }
     case e => throw new IllegalArgumentException(e.toString)
   }
-  
-  def handle(state: ResolverState, qtype: Either[RecordType, Unit], name: Name) : ResolverState = {
-    val (rtype:RecordType,wildcard) = qtype match { case Left(l) => (l,false) case Right(r) => (r,true) }
+
+  def handle(state: ResolverState, qtype: Either[RecordType, Unit], name: Name): ResolverState = {
+    val (rtype: RecordType, wildcard) = qtype match { case Left(l) => (l, false) case Right(r) => (r, true) }
     if (ans_tree.is_authoritative(name)) {
       ans_tree.get_rrs(name) match {
         case Some(rrs) => {
-          val (cnames,non_cnames) = partition_cnames(rrs)
+          val (cnames, non_cnames) = partition_cnames(rrs)
           if (cnames.isEmpty) {
             state.addAnswer(filter_rrs(rrs, rtype).map(map_enhance_name(name)))
+          } else if (cnames.length == 1) {
+            rtype match {
+              case CNAME() => throw new IllegalArgumentException("Illegal RecordType")
+              case _ => {
+                if (!wildcard) {
+                  cnames(0) match {
+                    case RR_CNAME(ttl,fqdn,childs) => collect_cnames(state.addAnswer(List((name,cnames(0)))),rtype, fqdn, childs)
+                    case e => throw new IllegalArgumentException(e.toString)
+                  }
+                } else {
+                  throw new IllegalArgumentException("Illegal RecordType")
+                }
+              }
+            }
           } else {
-            state
+            throw new IllegalArgumentException("Multiple CNames")
           }
         }
         case None => state
@@ -67,7 +83,23 @@ class Resolver(ans_tree: AnswerTree) {
     } else {
       state
     }
-  }   
+  }
+  
+  def collect_cnames(state:ResolverState,rtype:RecordType,name:Name,rr:List[RR]): ResolverState = rr match {
+    case RR_CNAME(ttl,fqdn,childs)::xs => collect_cnames(state.addAnswer(List((name,RR_CNAME(ttl,fqdn,childs)))),rtype,fqdn,xs)
+    case x::xs => state.addAnswer(List((name, x match {
+												case RR_A(_,_) if (rtype.id == 1) => x
+												case RR_NS(_,_,_) if (rtype.id == 2) => x
+												case RR_SOA(_,_,_,_,_,_,_,_) if (rtype.id == 6) => x
+												case RR_PTR(_,_) if (rtype.id == 12) => x
+												case RR_MX(_,_,_) if (rtype.id == 15) => x
+												case RR_TXT(_,_) if (rtype.id == 16) => x
+												case RR_CNAME(_,_,_) if (rtype.id == 5) => x
+												case x => throw new IllegalArgumentException(x.toString)
+											  })))
+    case scala.collection.immutable.Nil => throw new IllegalArgumentException("Empty CNames list") 
+    case x => throw new IllegalArgumentException(x.toString)
+  }
   
   def partition_cnames(rrs:List[RR]) = rrs.partition({ x => x match { case RR_CNAME(_,_,_) => true case _ => false}})
   def filter_rrs(rrs:List[RR], rtype: RecordType) = rrs.filter({
