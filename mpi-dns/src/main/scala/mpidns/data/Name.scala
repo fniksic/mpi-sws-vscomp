@@ -11,7 +11,7 @@ class Name(val fqdn: List[String]) {
 	}
 	
 	def equals(other: Name): Boolean = {
-	  return fqdn.equalsWith(other.fqdn)((a: String, b: String) => a.equalsIgnoreCase(b))
+	  return fqdn.corresponds(other.fqdn)((a: String, b: String) => a.equalsIgnoreCase(b))
 	}
 	
 	override def equals(other: Any): Boolean = {
