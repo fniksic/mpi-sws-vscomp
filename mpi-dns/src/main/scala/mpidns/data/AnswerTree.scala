@@ -7,16 +7,82 @@ import scala.Either.LeftProjection
 import scala.collection.immutable.Queue
 import gov.nasa.jpf.jvm.Verify
 
-sealed abstract class RR(ttl: Int) {}
+sealed abstract class RR(val ttl: Int, val recType: RecordType) {
+  def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
+    val recTypeBytes = Compression.int16ToBytes(recType.id)
+    val classBytes = Compression.int16ToBytes(1)
+    val ttlBytes = Compression.int32ToBytes(ttl)
+    (forest, data ++ recTypeBytes ++ classBytes ++ ttlBytes)
+  }
+}
 
-sealed case class RR_NS(ttl: Int, fqdn: Name, addrs: List[InetAddress]) extends RR(ttl)
-sealed case class RR_A(ttl: Int, addr: InetAddress) extends RR(ttl)
-sealed case class RR_SOA(ttl: Int, fqdn: Name, hostmaster: String, serial: Long,
-    refresh: Int, retry: Int, expire: Int, minimum: Int) extends RR(ttl)
-sealed case class RR_PTR(ttl: Int, fqdn: Name) extends RR(ttl)
-sealed case class RR_MX(ttl: Int, prio: Int, fqdn: Name) extends RR(ttl)
-sealed case class RR_TXT(ttl: Int, text: String) extends RR(ttl)
-sealed case class RR_CNAME(ttl: Int, fqdn: Name, child_records: List[RR]) extends RR(ttl)
+case class RR_A(ttl: Int, addr: InetAddress) extends RR(ttl, A()) {
+  override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
+    val (superForest, superData) = super.compress(forest, data)
+    val rdLengthBytes = Compression.int16ToBytes(4)
+    val addressBytes = addr.getAddress()
+    (superForest, superData ++ rdLengthBytes ++ addressBytes)
+  }
+}
+
+case class RR_NS(ttl: Int, fqdn: Name, addrs: List[InetAddress]) extends RR(ttl, NS()) {
+  override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
+    val (superForest, superData) = super.compress(forest, data)
+    Compression.updateWithUnknownLength(superForest, superData, Compression.addNameToForest(fqdn.fqdn))
+  }
+}
+
+case class RR_CNAME(ttl: Int, fqdn: Name, child_records: List[RR]) extends RR(ttl, CNAME()) {
+  override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
+    val (superForest, superData) = super.compress(forest, data)
+    Compression.updateWithUnknownLength(superForest, superData, Compression.addNameToForest(fqdn.fqdn))
+  }
+}
+
+case class RR_SOA(ttl: Int, fqdn: Name, hostmaster: Name, serial: Long,
+  refresh: Int, retry: Int, expire: Int, minimum: Int) extends RR(ttl, SOA()) {
+  override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
+    val (superForest, superData) = super.compress(forest, data)
+    val (forestWithMName, dataWithMName) =
+      Compression.updateWithUnknownLength(superForest, superData, Compression.addNameToForest(fqdn.fqdn))
+    val (forestWithRName, dataWithRName) =
+      Compression.updateWithUnknownLength(forestWithMName, dataWithMName, Compression.addNameToForest(hostmaster.fqdn))
+
+    val serialBytes = Compression.long32ToBytes(serial)
+    val refreshBytes = Compression.int32ToBytes(refresh)
+    val retryBytes = Compression.int32ToBytes(retry)
+    val expireBytes = Compression.int32ToBytes(expire)
+    val minimumBytes = Compression.int32ToBytes(minimum)
+
+    (forestWithRName, dataWithRName ++ serialBytes ++ refreshBytes ++ retryBytes ++ expireBytes ++ minimumBytes)
+  }
+}
+
+case class RR_PTR(ttl: Int, fqdn: Name) extends RR(ttl, PTR()) {
+  override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
+    val (superForest, superData) = super.compress(forest, data)
+    Compression.updateWithUnknownLength(superForest, superData, Compression.addNameToForest(fqdn.fqdn))
+  }
+}
+
+case class RR_MX(ttl: Int, prio: Int, fqdn: Name) extends RR(ttl, MX()) {
+  override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
+    val (superForest, superData) = super.compress(forest, data)
+    val preferenceBytes = Compression.int16ToBytes(prio)
+    Compression.updateWithUnknownLength(superForest, superData ++ preferenceBytes, Compression.addNameToForest(fqdn.fqdn))
+  }
+}
+
+case class RR_TXT(ttl: Int, text: String) extends RR(ttl, TXT()) {
+  override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
+    val (superForest, superData) = super.compress(forest, data)
+    val textBytes = text.getBytes()
+    val textLengthBytes = Array(textBytes.length.toByte)
+    val rdLength = textBytes.length + 1
+    val rdLengthBytes = Compression.int16ToBytes(rdLength)
+    (superForest, superData ++ rdLengthBytes ++ textLengthBytes ++ textBytes)
+  }
+}
 
 sealed class AnswerTreeNode(Children:Map[String, AnswerTreeNode], Rrs: List[RR],
     Authoritative: Boolean) {
@@ -65,8 +131,7 @@ sealed class AnswerTree(root: AnswerTreeNode) {
       return new Some(cn)
     }
     
-    private def find_maximal_prefix_for (n: Name, p: AnswerTreeNode => Boolean):
-    	Option[AnswerTreeNode] = {
+  private def find_maximal_prefix_for(n: Name, p: AnswerTreeNode => Boolean): Option[AnswerTreeNode] = {
       var last: Option[AnswerTreeNode] = None
       var cn = node
       for (ne <- n.fqdn.reverse) {
@@ -190,8 +255,7 @@ object BuildAnswerTree {
     return new Analysis(new_cname, new_ns, new_mx, new_errs)
   }
   
-  def resolve_cnames (cnames: Map[Name, Name]) (plainTree: PlainTree) (progress: Boolean)
-    	(defer: List[Name]) (todo: List[Name]) (done: Set[Name]): Option[Set[Error]] = {
+  def resolve_cnames(cnames: Map[Name, Name])(plainTree: PlainTree)(progress: Boolean)(defer: List[Name])(todo: List[Name])(done: Set[Name]): Option[Set[Error]] = {
       todo match {
         case scala.collection.immutable.Nil =>
         	defer match {
@@ -256,11 +320,11 @@ object BuildAnswerTree {
     return plainRRs.foldLeft(map)((map: Map[PlainRR, RR], rr: PlainRR) => map + (rr -> xfrm(rr)))
   }
 
-  def map_names (rrmap: Map[PlainRR, RR])
-  	  (map: Map[Name, List[RR]], prefix: Stack[String], rrs: List[PlainRR]): Map[Name, List[RR]] = {
+  def map_names(rrmap: Map[PlainRR, RR])(map: Map[Name, List[RR]], prefix: Stack[String], rrs: List[PlainRR]): Map[Name, List[RR]] = {
     rrs match {
       case PlainRR_CNAME(_, _) :: _ => return map
-      case _ => val mapped_rrs = rrs.map(rrmap)
+      case _ =>
+        val mapped_rrs = rrs.map(rrmap)
       	return map + (new Name(prefix.toList) -> mapped_rrs)
     }
   }
@@ -301,8 +365,7 @@ object BuildAnswerTree {
     return s.pop
   }
 
-  def rec_sat_cnames (map: Map[Name, List[RR]]) (plainTree: PlainTree) (n: Name):
-	  Map[Name, List[RR]]= {
+  def rec_sat_cnames(map: Map[Name, List[RR]])(plainTree: PlainTree)(n: Name): Map[Name, List[RR]] = {
     println("Getting data for " + n)
     println("  <-" + map)
     println("  -> " + map.get(n))
@@ -315,8 +378,7 @@ object BuildAnswerTree {
     val cname_rec = RR_CNAME(ttl, point_to, map.get(point_to).get)
     return (finished_map + (n -> List(cname_rec)))
   }
-  def saturate_cnames(map: Map[Name, List[RR]], plainTree: PlainTree, todo: Set[Name]):
-	  Map[Name, List[RR]]= {
+  def saturate_cnames(map: Map[Name, List[RR]], plainTree: PlainTree, todo: Set[Name]): Map[Name, List[RR]] = {
     var m = map
     for (n <- todo) {
       m = rec_sat_cnames(m)(plainTree)(n)
@@ -371,8 +433,7 @@ object BuildAnswerTree {
      * The check for 3 is done in a later step.
      */
     val (cnames, ns_pointees, mx_pointees, errs) =
-      plainTree.DFS(analysis_dfs, new Analysis(Map(), Set(), Set(), Set()))
-      match { case Analysis(cn, ns, mx, err) => (cn, ns, mx, err) }
+      plainTree.DFS(analysis_dfs, new Analysis(Map(), Set(), Set(), Set())) match { case Analysis(cn, ns, mx, err) => (cn, ns, mx, err) }
     val outside: Set[Name] = Set() /* Fix this later TODO */
     /* SPEC:
      * (a -> b) in cnames <-> PT[a] has CNAME b
@@ -455,8 +516,7 @@ object BuildAnswerTree {
      */    
     /* Building the final tree, round 1: Build actual RRs. Start with
      * non-NS, non-CNAME; then, NS; then, CNAME */
-    def collect_RRs(rr_set: Set[PlainRR], path: Stack[String], more_rrs: List[PlainRR]):
-      Set[PlainRR] = rr_set.union(more_rrs.toSet)      
+    def collect_RRs(rr_set: Set[PlainRR], path: Stack[String], more_rrs: List[PlainRR]): Set[PlainRR] = rr_set.union(more_rrs.toSet)
     val all_rrs = plainTree.DFS(collect_RRs, Set(): Set[PlainRR])
     val (rrs_cname, rrs_not_cname) = all_rrs.partition(Helpers.is_p_cname)
     val (rrs_ns, rrs_other) = rrs_not_cname.partition(Helpers.is_p_ns)
