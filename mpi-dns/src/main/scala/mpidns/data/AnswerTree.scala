@@ -148,16 +148,25 @@ object BuildAnswerTree {
     var new_errs = a.errors
     var new_ns = a.ns_rhs
     var new_mx = a.mx_rhs
-    val name = new Name(n.toList.reverse)
+    val name = new Name(n.toList)
     if (rr.count(Helpers.is_p_soa) >= 2)
-      new_errs = new_errs +  new ErrorDoubleSOA(name)    
-    /* 2. If A[F] contains a CNAME, it must not contain other records. */
+      new_errs = new_errs +  new ErrorDoubleSOA(name)
+    println("Considering " + n);
+    for (rrr <- rr) {
+      println("  " + rrr.toString())
+    }
+    /* 2. If A[F] contains a CNAME, it must not contain other records. */    
     if (rr.exists(Helpers.is_p_cname)) {
+      println("  Found a CNAME, checking (2)")
       if (rr.size > 1) {
+        println("  CNAME is not alone - error")
         new_errs = new_errs + new ErrorCNAME(name)
       } else {
         rr match {
-          case PlainRR_CNAME(_, cname) :: _ => new_cname = new_cname + (name -> cname)
+          case PlainRR_CNAME(_, cname) :: _ => {
+              println("  Store the CNAME - " + name.toString + " -> " + cname.toString)
+              new_cname = new_cname + (name -> cname)
+            }
           case _ => throw new AssertionError("Unreachable")
         }
       }
@@ -165,8 +174,16 @@ object BuildAnswerTree {
     /* Ignore 7 for now */
     for (one_rr <- rr) {
       one_rr match {
-        case PlainRR_MX(_, _, n) => new_mx = new_mx + n
-        case PlainRR_NS(_, n) => new_ns = new_ns + n
+        case PlainRR_MX(_, _, n) => 
+          {
+            println("  Got an MX " + one_rr + ", storing " + n)
+            new_mx = new_mx + n
+          }
+        case PlainRR_NS(_, n) => 
+          {
+            println("  Got an NS " + one_rr + ", storing " + n)
+            new_ns = new_ns + n
+          }
         case _ => 
       }
     }
@@ -183,6 +200,11 @@ object BuildAnswerTree {
         	  case _ =>
         	    if (progress)
         	      return resolve_cnames(cnames)(plainTree)(false)(List())(defer)(done)
+        	    println("Found CNAME loop")
+        	    println("cname map " + cnames)
+        	    println("deferred names: " + defer)
+        	    println("todo names: " + todo)
+        	    println("handled names: " + done)
         	    def cname_err (n: Name) = new ErrorCNAMELoop(n)
         	    val errs = defer.map(cname_err)
         	    return new Some(errs.toSet)
@@ -192,7 +214,7 @@ object BuildAnswerTree {
           if (done(cname))
             return resolve_cnames(cnames)(plainTree)(true)(defer)(rest)(done + name)
           else
-            if (cnames.keySet(name))
+            if (cnames.keySet(cname))
               return resolve_cnames(cnames)(plainTree)(progress)(name :: defer)(rest)(done)
             else {
               return resolve_cnames(cnames)(plainTree)(true)(defer)(rest)(done + name)
@@ -239,7 +261,7 @@ object BuildAnswerTree {
     rrs match {
       case PlainRR_CNAME(_, _) :: _ => return map
       case _ => val mapped_rrs = rrs.map(rrmap)
-      	return map + (new Name(prefix.toList.reverse) -> mapped_rrs)
+      	return map + (new Name(prefix.toList) -> mapped_rrs)
     }
   }
 
@@ -281,10 +303,13 @@ object BuildAnswerTree {
 
   def rec_sat_cnames (map: Map[Name, List[RR]]) (plainTree: PlainTree) (n: Name):
 	  Map[Name, List[RR]]= {
+    println("Getting data for " + n)
+    println("  <-" + map)
+    println("  -> " + map.get(n))
     if (map.get(n).isDefined) return map
     val (ttl, point_to) = plainTree.getRR(n) match {
       case Some(PlainRR_CNAME(ttl, cname) :: _) => (ttl, cname)
-      case _ => throw new AssertionError("unreachable")
+      case _ => return map 
     }
     val finished_map = rec_sat_cnames(map)(plainTree)(point_to)
     val cname_rec = RR_CNAME(ttl, point_to, map.get(point_to).get)
@@ -294,7 +319,7 @@ object BuildAnswerTree {
 	  Map[Name, List[RR]]= {
     var m = map
     for (n <- todo) {
-      m = rec_sat_cnames(map)(plainTree)(n)
+      m = rec_sat_cnames(m)(plainTree)(n)
     }
     return m
   }
@@ -420,8 +445,9 @@ object BuildAnswerTree {
     /* We have now checked 1, 2, 3, 5, 6 and 7. Checking 4 is easier on the final
      * answer tree, so build that now. Also, we ignore 4 for the time being.
      */
-    if (all_errs.size > 0)
-      return new Right(errs)
+    if (all_errs.size > 0) { 
+      return new Right(all_errs)
+    }
     /* SPEC:
      * (a -> b) in cnames <-> PT[a] has CNAME b
      * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
@@ -466,6 +492,7 @@ object BuildAnswerTree {
      */
     /* Map non-CNAME nodes */
     val non_cname_rrs_for_names = plainTree.DFS(map_names(rr_non_cname), Map[Name,List[RR]]())
+    println("Data so far: " + non_cname_rrs_for_names)
     /* SPEC:
      * (a -> b) in cnames <-> PT[a] has CNAME b
      * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 

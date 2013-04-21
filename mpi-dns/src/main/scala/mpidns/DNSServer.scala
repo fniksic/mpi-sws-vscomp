@@ -41,7 +41,7 @@ object DNSServer {
       case Left(at) => at
       case Right(err) => {
         MSG("Error: bad zone file")
-        err.foreach({e => println(e.n)})
+        err.foreach({e => println(e.n + ": " + e.msg)})
       }
       sys.exit() // TODO dump error messages
     }

@@ -82,7 +82,7 @@ class NonemptyPlainTree(Root: TreeNode) extends PlainTree {
         return new TreeNode(node.children, rr :: node.rrs)
       case head :: tail =>
         val new_child = node.children.get(head) match {
-          case None => PlainTreeHelpers.build_path(fqdn.reverse, rr)
+          case None => PlainTreeHelpers.build_path(fqdn.tail.reverse, rr)
           case Some(child) => doAddRR(tail, child, rr)
         }
         return new TreeNode(node.children - head + (head -> new_child), node.rrs)
