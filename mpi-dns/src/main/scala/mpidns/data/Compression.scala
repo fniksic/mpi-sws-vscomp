@@ -122,4 +122,28 @@ object Compression {
     (idBytes :+ bunchByte :+ zeroRCodeByte) ++ questionCountBytes ++ answerCountBytes ++ authorityCountBytes ++ additionalCountBytes
   }
 
+  def isPointer(byte: Byte) = (byte & 0xc0) != 0
+
+  def getPointer(first: Byte, second: Byte) = first << 8 | second
+
+  def getLabelLength(byte: Byte) = byte & 0x3f
+
+  def extractLabel(data: Array[Byte], start: Int, length: Int) = new String(data.slice(start, start + length))
+
+  def extractName_(data: Array[Byte], start: Int, accu: List[String], visited: Set[Int], next: Option[Int]): (List[String], Int) = {
+    if (isPointer(data(start))) {
+      val pointer = getPointer(data(start), data(start + 1))
+      val newNext = next orElse Some(start + 2)
+      if (visited contains pointer) (accu, newNext.get)
+      else extractName_(data, pointer, accu, visited + pointer, newNext)
+    } else {
+      val labelLength = getLabelLength(data(start))
+      val newNext = next orElse Some(start + labelLength + 1)
+      if (labelLength == 0) (accu, newNext.get)
+      else extractName_(data, start + labelLength, extractLabel(data, start, labelLength) :: accu, visited, newNext)
+    }
+  }
+
+  def extractName(data: Array[Byte], start: Int) = extractName_(data, start, List(), Set(), None)
+
 }
