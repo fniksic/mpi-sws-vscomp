@@ -38,10 +38,10 @@ object ZoneFileReader {
   }
   private def IP(ip: String): InetAddress = InetAddress.getByAddress(IPAddressUtil.textToNumericFormatV4(ip))
   private def IP2PTR(address: InetAddress): String = {
-    InetAddress.getByAddress(address.getAddress().reverse) + "in-addr.arpa"
+    InetAddress.getByAddress(address.getAddress().reverse).getHostAddress() + ".in-addr.arpa"
   }
 
-  def parse(path: String): List[Tuple2[String, PlainRR]] = {
+  def read(path: String): List[Tuple2[String, PlainRR]] = {
     file = new File(path)
     var tokens: List[Tuple2[String, PlainRR]] = List()
     try {
@@ -77,7 +77,7 @@ object ZoneFileReader {
         case '&' => parseAmp(rest)
         case '=' => parseEqual(rest)
         case '+' => parsePlus(rest)
-        //case '^' => parseHead(rest)
+        case '^' => parseHead(rest)
         case '@' => parseAt(rest)
         case ''' => parseApo(rest)
         case 'C' => parseC(rest)
@@ -117,9 +117,11 @@ object ZoneFileReader {
     case e => throw new IllegalArgumentException(e.toString)
   }
 
-  /*private def parseHead(tokens: ListString): List[Tuple2[String, PlainRR]] = {
-    
-  }*/
+  private def parseHead(tokens: ListString): List[Tuple2[String, PlainRR]] = tokens match {
+    case Cons(fqdn, Cons(p, Cons(ttl, Nil()))) =>
+      List((p, PlainRR_PTR(TTL(ttl), new Name(fqdn))))
+    case e => throw new IllegalArgumentException(e.toString)
+  }
 
   private def parseAt(tokens: ListString): List[Tuple2[String, PlainRR]] = tokens match {
     case Cons(fqdn, Cons(ip, Cons(x, Cons(dist, Cons(ttl, Nil()))))) =>
