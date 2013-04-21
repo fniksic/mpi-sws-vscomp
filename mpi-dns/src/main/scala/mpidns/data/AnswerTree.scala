@@ -5,6 +5,7 @@ import scala.collection.immutable.Stack
 import scala.collection.immutable.Set
 import scala.Either.LeftProjection
 import scala.collection.immutable.Queue
+import gov.nasa.jpf.jvm.Verify
 
 sealed abstract class RR(ttl: Int) {}
 
@@ -298,6 +299,35 @@ object BuildAnswerTree {
     return m
   }
   
+  def spec_cnames_correct(pt: PlainTree, cnames: Map[Name, Name]): Boolean = ({
+    // check forward
+    for ((n, cn) <- cnames) {
+      pt.getRR(n) match {
+        case None => return false
+        case Some(l) => if (!l.exists(Helpers.is_p_cname)) return false
+      }
+    }
+    // check backward
+    // TODO
+    return true
+  })
+
+  def spec_nsp_correct(plainTree: PlainTree, ns_pointees: Set[Name]): Boolean = {
+    return true
+  } 
+
+  def spec_mx_correct(plainTree: PlainTree, mx_pointees: Set[Name]): Boolean = {
+    return true
+  }
+
+  def spec_soa_correct(plainTree: PlainTree): Boolean = {
+    return true
+  }
+
+  def spec_cname_correct(plainTree: PlainTree): Boolean = {
+    return true
+  }
+
   def build_answer_tree(plainTree: PlainTree): Either[AnswerTree, Set[Error]] = {
     /* iterate through the tree while checking invariants and collecting information. */
     /* 1. A[F] must not contain two SOA records.
@@ -319,11 +349,36 @@ object BuildAnswerTree {
       plainTree.DFS(analysis_dfs, new Analysis(Map(), Set(), Set(), Set()))
       match { case Analysis(cn, ns, mx, err) => (cn, ns, mx, err) }
     val outside: Set[Name] = Set() /* Fix this later TODO */
+    /* SPEC:
+     * (a -> b) in cnames <-> PT[a] has CNAME b
+     * n in ns_pointess <-> there is an f s.t. PT[f] has NS n
+     * n in mx_pointees <-> there is an f and a p s.t. PT[f] has MX p n
+     * err empty <-> PT satisfies 1, 2 (TODO: make it also satisfy 7) 
+     */
+    assert(spec_cnames_correct(plainTree, cnames))
+    assert(spec_nsp_correct(plainTree, ns_pointees))
+    assert(spec_mx_correct(plainTree, mx_pointees))
+    if (errs.isEmpty) {
+      assert(spec_soa_correct(plainTree))
+      assert(spec_cname_correct(plainTree))
+    }
     /* Now, check 5 and 6. */
     def errmx (name: Name): Error = new ErrorMX(name)
     val mx_errs = errs.union(mx_pointees.intersect(cnames.keySet).map(errmx))
+    /* SPEC:
+     * (a -> b) in cnames <-> PT[a] has CNAME b
+     * n in ns_pointess <-> there is an f s.t. PT[f] has NS n
+     * n in mx_pointees <-> there is an f and a p s.t. PT[f] has MX p n
+     * err empty <-> PT satisfies 1, 2, 5 (TODO: make it also satisfy 7) 
+     */
     def errna (name: Name): Error = new ErrorNonauth(name)
     val na_mx_errs = mx_errs.union(outside.diff(ns_pointees).map(errna))
+    /* SPEC:
+     * (a -> b) in cnames <-> PT[a] has CNAME b
+     * n in ns_pointess <-> there is an f s.t. PT[f] has NS n
+     * n in mx_pointees <-> there is an f and a p s.t. PT[f] has MX p n
+     * err empty <-> PT satisfies 1, 2, 5 (TODO: make it also satisfy 6, 7) 
+     */
     /* Collect NS information */
     def fold_ns (name: Name, data: Map[Name, List[PlainRR]]): Map[Name, List[PlainRR]] = {
       plainTree.getRR(name) match {
@@ -333,17 +388,45 @@ object BuildAnswerTree {
     }
     val ns_info: Map[Name, List[PlainRR]] =
       ns_pointees.foldRight(Map[Name, List[PlainRR]]())(fold_ns)
+    /* SPEC:
+     * (a -> b) in cnames <-> PT[a] has CNAME b
+     * n in ns_pointess <-> there is an f s.t. PT[f] has NS n
+     * n in mx_pointees <-> there is an f and a p s.t. PT[f] has MX p n
+     * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
+     * err empty <-> PT satisfies 1, 2, 5 (TODO: make it also satisfy 6, 7) 
+     */
     /* Resolve CNAMEs */
     val resolve_result = resolve_cnames(cnames)(plainTree)(false)(List())(cnames.keys.toList)(Set())
+    /* SPEC:
+     * (a -> b) in cnames <-> PT[a] has CNAME b
+     * n in ns_pointess <-> there is an f s.t. PT[f] has NS n
+     * n in mx_pointees <-> there is an f and a p s.t. PT[f] has MX p n
+     * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
+     * err empty <-> PT satisfies 1, 2, 5 (TODO: make it also satisfy 6, 7)
+     * resolve_resule = None => PT satisfies 3
+     * resolve_resuls = Some(x) => PT has CNAME loops 
+     */
     val all_errs = resolve_result match {
       case Some(extra_errs) => na_mx_errs.union(extra_errs)
       case None => na_mx_errs
     }
+    /* SPEC:
+     * (a -> b) in cnames <-> PT[a] has CNAME b
+     * n in ns_pointess <-> there is an f s.t. PT[f] has NS n
+     * n in mx_pointees <-> there is an f and a p s.t. PT[f] has MX p n
+     * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
+     * err empty <-> PT satisfies 1, 2, 3, 5 (TODO: make it also satisfy 6, 7)
+     */    
     /* We have now checked 1, 2, 3, 5, 6 and 7. Checking 4 is easier on the final
      * answer tree, so build that now. Also, we ignore 4 for the time being.
      */
     if (all_errs.size > 0)
       return new Right(errs)
+    /* SPEC:
+     * (a -> b) in cnames <-> PT[a] has CNAME b
+     * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
+     * PT satisfies 1, 2, 3, 5 (TODO: make it also satisfy 6, 7)
+     */    
     /* Building the final tree, round 1: Build actual RRs. Start with
      * non-NS, non-CNAME; then, NS; then, CNAME */
     def collect_RRs(rr_set: Set[PlainRR], path: Stack[String], more_rrs: List[PlainRR]):
@@ -351,17 +434,70 @@ object BuildAnswerTree {
     val all_rrs = plainTree.DFS(collect_RRs, Set(): Set[PlainRR])
     val (rrs_cname, rrs_not_cname) = all_rrs.partition(Helpers.is_p_cname)
     val (rrs_ns, rrs_other) = rrs_not_cname.partition(Helpers.is_p_ns)
+    /* SPEC:
+     * (a -> b) in cnames <-> PT[a] has CNAME b
+     * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
+     * PT satisfies 1, 2, 3, 5 (TODO: make it also satisfy 6, 7)
+     * rrs_cname = { r: CNAME(t, n) | exists f, r in PT[f] }
+     * rrs_ns = { r: NS(t, n) | exists f, r in PT[f] }
+     * rrs_cname = { r | exists f, r in PT[f], r neither CNAME nor NS }
+     */    
     /* Deal with the non-NS, non-CNAME case */
     val rr_other = extend_map(map_rr_simple)(Map[PlainRR,RR]())(rrs_other)
+    /* SPEC:
+     * (a -> b) in cnames <-> PT[a] has CNAME b
+     * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
+     * PT satisfies 1, 2, 3, 5 (TODO: make it also satisfy 6, 7)
+     * rrs_cname = { r: CNAME(t, n) | exists f, r in PT[f] }
+     * rrs_ns = { r: NS(t, n) | exists f, r in PT[f] }
+     * rrs_other = { r | exists f, r in PT[f], r neither CNAME nor NS }
+     * rr_other = (PlainRR -> RR)|_{rrs_other}
+     */
     /* Now map NS */
     val rr_non_cname = extend_map(map_rr_ns(plainTree))(rr_other)(rrs_ns)
+    /* SPEC:
+     * (a -> b) in cnames <-> PT[a] has CNAME b
+     * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
+     * PT satisfies 1, 2, 3, 5 (TODO: make it also satisfy 6, 7)
+     * rrs_cname = { r: CNAME(t, n) | exists f, r in PT[f] }
+     * rrs_ns = { r: NS(t, n) | exists f, r in PT[f] }
+     * rrs_other = { r | exists f, r in PT[f], r neither CNAME nor NS }
+     * rr_non_cname = (PlainRR -> RR)|_{rrs_other \cup rrs_ns}
+     */
     /* Map non-CNAME nodes */
     val non_cname_rrs_for_names = plainTree.DFS(map_names(rr_non_cname), Map[Name,List[RR]]())
+    /* SPEC:
+     * (a -> b) in cnames <-> PT[a] has CNAME b
+     * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
+     * PT satisfies 1, 2, 3, 5 (TODO: make it also satisfy 6, 7)
+     * rrs_cname = { r: CNAME(t, n) | exists f, r in PT[f] }
+     * rrs_ns = { r: NS(t, n) | exists f, r in PT[f] }
+     * rrs_other = { r | exists f, r in PT[f], r neither CNAME nor NS }
+     * rr_non_cname = (PlainRR -> RR)|_{rrs_other \cup rrs_ns}
+     * non_cname_rrs_for_names = (Name -> RR^*)|_{ { n | PT[f] has no CNAME } }
+     */
     /* Extend with CNAME RRset mappings */
-    val all_rrs_for_names = saturate_cnames(non_cname_rrs_for_names, plainTree, cnames.keySet)
+    val all_rrs_for_names = saturate_cnames(non_cname_rrs_for_names, 
+        plainTree, cnames.keySet)
+    /* SPEC:
+     * (a -> b) in cnames <-> PT[a] has CNAME b
+     * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
+     * PT satisfies 1, 2, 3, 5 (TODO: make it also satisfy 6, 7)
+     * all_rrs_for_names = (Name -> RR^*)
+     */        
     /* Finally, build the answer tree */
     val state: State = new State(None, Stack[AnswerTreeNode]())
     val final_state = plainTree.DFS(build_pre(all_rrs_for_names), build_post, state)
     return new Left(new AnswerTree(final_state.last.get))
+  }    
+}
+
+object Test {
+  def main(args: Array[String]) = {
+    val pt:PlainTree = Verify.getObject("mpidns.data.PlainTree").asInstanceOf[PlainTree]
+    BuildAnswerTree.build_answer_tree(pt) match {
+      case Left(_) => println("ok");
+      case Right(_) => println("fail");
+    }
   }
 }
