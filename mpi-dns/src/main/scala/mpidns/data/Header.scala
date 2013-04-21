@@ -1,16 +1,16 @@
 package mpidns.data
 
 case class Header(
-  id: Int,
-  response: Boolean,
-  opCode: Int,
-  authoritative: Boolean,
-  truncated: Boolean,
-  recursionDesired: Boolean,
-  recursionAvailable: Boolean,
-  zero: Int = 0,
-  rCode: Int,
-  questionCount: Int,
-  answerCount: Int,
-  authorityCount: Int,
-  additionalCount: Int)
+  val id: Int,
+  val response: Boolean,
+  val opCode: Int,
+  val authoritative: Boolean,
+  val truncated: Boolean,
+  val recursionDesired: Boolean,
+  val recursionAvailable: Boolean,
+  val zero: Int = 0,
+  val rCode: Int,
+  val questionCount: Int,
+  val answerCount: Int,
+  val authorityCount: Int,
+  val additionalCount: Int)
