@@ -44,7 +44,7 @@ class Resolver(ans_tree: AnswerTree) {
   def resolve(msg: Message): Message = msg match {
     case Message(header:Header,query:Array[Question],answers:Array[(Name,RR)],
     			 authority:Array[(Name,RR)],additional: Array[(Name,RR)]) => {
-      val state: ResolverState = query.foldLeft(new ResolverState(Array[(Name,RR)](),Array[(Name,RR)](),Array[(Name,RR)](),true,NO_ERROR()))((state,q) => handle(state,q.qtype,q.qname))
+      val state: ResolverState = query.foldLeft(new ResolverState(Array[(Name,RR)](),Array[(Name,RR)](),Array[(Name,RR)](),true,NO_ERROR))((state,q) => handle(state,q.qtype,q.qname))
       val r_header = Header(header.id,true,header.opCode,state.authoritative,false,header.recursionDesired,false,header.zero,
     		  				state.rcode.id,0,state.answers.length,state.authorities.length,state.additionals.length)	  
 	  Message(r_header,Array[Question](),state.answers,state.authorities,state.additionals)	    
@@ -62,7 +62,7 @@ class Resolver(ans_tree: AnswerTree) {
             state.addAnswer(filter_rrs(rrs, rtype).map(map_enhance_name(name)))
           } else if (cnames.length == 1) {
             rtype match {
-              case CNAME() => throw new IllegalArgumentException("Illegal RecordType")
+              case CNAME => throw new IllegalArgumentException("Illegal RecordType")
               case _ => {
                 if (!wildcard) {
                   cnames(0) match {

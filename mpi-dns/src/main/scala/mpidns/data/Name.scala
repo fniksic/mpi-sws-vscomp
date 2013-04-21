@@ -1,7 +1,7 @@
 package mpidns.data
 
 class Name(val fqdn: List[String]) {
-	def this(FQDN: String) = this(List.fromArray(FQDN split "\\."))
+	def this(FQDN: String) = this((FQDN split "\\.").toList)
 	override def toString: String = {
 	  fqdn match {
 	    case scala.collection.immutable.Nil => return "."

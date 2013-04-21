@@ -15,7 +15,7 @@ sealed abstract class RR(ttl: Int, val recType: RecordType) {
   }
 }
 
-case class RR_A(ttl: Int, addr: InetAddress) extends RR(ttl, A()) {
+case class RR_A(ttl: Int, addr: InetAddress) extends RR(ttl, A) {
   override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
     val (superForest, superData) = super.compress(forest, data)
     val rdLengthBytes = Compression.int16ToBytes(4)
@@ -24,14 +24,14 @@ case class RR_A(ttl: Int, addr: InetAddress) extends RR(ttl, A()) {
   }
 }
 
-case class RR_NS(ttl: Int, fqdn: Name, addrs: List[InetAddress]) extends RR(ttl, NS()) {
+case class RR_NS(ttl: Int, fqdn: Name, addrs: List[InetAddress]) extends RR(ttl, NS) {
   override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
     val (superForest, superData) = super.compress(forest, data)
     Compression.updateWithUnknownLength(superForest, superData, Compression.addNameToForest(fqdn.fqdn))
   }
 }
 
-case class RR_CNAME(ttl: Int, fqdn: Name, child_records: List[RR]) extends RR(ttl, CNAME()) {
+case class RR_CNAME(ttl: Int, fqdn: Name, child_records: List[RR]) extends RR(ttl, CNAME) {
   override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
     val (superForest, superData) = super.compress(forest, data)
     Compression.updateWithUnknownLength(superForest, superData, Compression.addNameToForest(fqdn.fqdn))
@@ -39,7 +39,7 @@ case class RR_CNAME(ttl: Int, fqdn: Name, child_records: List[RR]) extends RR(tt
 }
 
 case class RR_SOA(ttl: Int, fqdn: Name, hostmaster: Name, serial: Long,
-  refresh: Int, retry: Int, expire: Int, minimum: Int) extends RR(ttl, SOA()) {
+  refresh: Int, retry: Int, expire: Int, minimum: Int) extends RR(ttl, SOA) {
   override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
     val (superForest, superData) = super.compress(forest, data)
     val (forestWithMName, dataWithMName) =
@@ -57,14 +57,14 @@ case class RR_SOA(ttl: Int, fqdn: Name, hostmaster: Name, serial: Long,
   }
 }
 
-case class RR_PTR(ttl: Int, fqdn: Name) extends RR(ttl, PTR()) {
+case class RR_PTR(ttl: Int, fqdn: Name) extends RR(ttl, PTR) {
   override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
     val (superForest, superData) = super.compress(forest, data)
     Compression.updateWithUnknownLength(superForest, superData, Compression.addNameToForest(fqdn.fqdn))
   }
 }
 
-case class RR_MX(ttl: Int, prio: Int, fqdn: Name) extends RR(ttl, MX()) {
+case class RR_MX(ttl: Int, prio: Int, fqdn: Name) extends RR(ttl, MX) {
   override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
     val (superForest, superData) = super.compress(forest, data)
     val preferenceBytes = Compression.int16ToBytes(prio)
@@ -72,7 +72,7 @@ case class RR_MX(ttl: Int, prio: Int, fqdn: Name) extends RR(ttl, MX()) {
   }
 }
 
-case class RR_TXT(ttl: Int, text: String) extends RR(ttl, TXT()) {
+case class RR_TXT(ttl: Int, text: String) extends RR(ttl, TXT) {
   override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
     val (superForest, superData) = super.compress(forest, data)
     val textBytes = text.getBytes()
@@ -340,6 +340,10 @@ object BuildAnswerTree {
         return new State(None, work.push(new_node))
       }
     }
+    def push(rr: List[RR], auth: Boolean): State = {
+      return new State(None, work.push(new AnswerTreeNode(Map[String, AnswerTreeNode](),
+          rr, auth)))
+    }
     def pop: State = {
       return new State(Some(work.head), work.tail)
     }
@@ -357,7 +361,10 @@ object BuildAnswerTree {
       if (rrs.exists(Helpers.is_p_soa)) true
       else if (rrs.exists(Helpers.is_p_ns)) false
       else s.is_auth
-    return s.push(pref.head, rr_map.get(new Name(pref.toList.reverse)).get, auth)
+    if (pref.isEmpty)
+      return s.push(rr_map.get(new Name(pref.toList)).get, auth)
+    else
+      return s.push(pref.head, rr_map.get(new Name(pref.toList)).get, auth)
   }
 
   def build_post(s: State, pref: Stack[String], rrs: List[PlainRR]): State = {
