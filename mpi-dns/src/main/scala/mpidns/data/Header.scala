@@ -1,6 +1,6 @@
 package mpidns.data
 
-class Header(
+case class Header(
   id: Int,
   response: Boolean,
   opCode: Int,
