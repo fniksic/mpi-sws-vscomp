@@ -27,22 +27,22 @@ import mpidns.data.PlainRR_TXT
 
 class Resolver(ans_tree: AnswerTree) {
   
-  class ResolverState(val answers: Array[PlainRR],
-		  			  val authorities: Array[PlainRR],
-		  			  val additionals: Array[PlainRR],
+  class ResolverState(val answers: Array[(Name,RR)],
+		  			  val authorities: Array[(Name,RR)],
+		  			  val additionals: Array[(Name,RR)],
 		  			  val authoritative: Boolean,
 		  			  val rcode: ResponseCode) {
-    def addAnswer(answer: List[PlainRR]) = new ResolverState(answers ++ answer, authorities, additionals, authoritative, rcode)
-    def addAuthority(answer: List[PlainRR]) = new ResolverState(answers, authorities ++ answer, additionals, authoritative, rcode)
-    def addAdditionals(answer: List[PlainRR]) = new ResolverState(answers, authorities, additionals ++ answer, authoritative, rcode)
+    def addAnswer(answer: List[(Name,RR)]) = new ResolverState(answers ++ answer, authorities, additionals, authoritative, rcode)
+    def addAuthority(answer: List[(Name,RR)]) = new ResolverState(answers, authorities ++ answer, additionals, authoritative, rcode)
+    def addAdditionals(answer: List[(Name,RR)]) = new ResolverState(answers, authorities, additionals ++ answer, authoritative, rcode)
     def setAuthoritative(auth: Boolean) = new ResolverState(answers, authorities, additionals, auth, rcode)
     def setResponseCode(rc: ResponseCode) = new ResolverState(answers, authorities, additionals, authoritative, rc)
   }
   
   def resolve(msg: Message): Message = msg match {
-    case Message(header:Header,query:Array[Question],answers:Array[PlainRR],
-    			 authority:Array[PlainRR],additional: Array[PlainRR]) => {
-      val state: ResolverState = query.foldLeft(new ResolverState(Array[PlainRR](),Array[PlainRR](),Array[PlainRR](),true,NO_ERROR()))((state,q) => handle(state,q.qtype,q.qname))
+    case Message(header:Header,query:Array[Question],answers:Array[(Name,RR)],
+    			 authority:Array[(Name,RR)],additional: Array[(Name,RR)]) => {
+      val state: ResolverState = query.foldLeft(new ResolverState(Array[(Name,RR)](),Array[(Name,RR)](),Array[(Name,RR)](),true,NO_ERROR()))((state,q) => handle(state,q.qtype,q.qname))
       val r_header = Header(header.id,true,header.opCode,state.authoritative,false,header.recursionDesired,false,header.zero,
     		  				state.rcode.id,0,state.answers.length,state.authorities.length,state.additionals.length)	  
 	  Message(r_header,Array[Question](),state.answers,state.authorities,state.additionals)	    
@@ -57,7 +57,7 @@ class Resolver(ans_tree: AnswerTree) {
         case Some(rrs) => {
           val (cnames,non_cnames) = partition_cnames(rrs)
           if (cnames.isEmpty) {
-            state.addAnswer(filter_rrs(rrs, rtype).map(map_simple_to_rr))
+            state.addAnswer(filter_rrs(rrs, rtype).map(map_enhance_name(name)))
           } else {
             state
           }
@@ -82,13 +82,5 @@ class Resolver(ans_tree: AnswerTree) {
       case _ => false
     }
   })
-  def map_simple_to_rr(rr: RR): PlainRR = rr match {
-    case RR_A(ttl, addr) => PlainRR_A(ttl, addr)
-    case RR_MX(ttl, prio, name) => PlainRR_MX(ttl, prio, name)
-    case RR_PTR(ttl, name) => PlainRR_PTR(ttl, name)
-    case RR_SOA(ttl, pns, hostmaster, serial, t1, t2, t3, t4) => 
-      PlainRR_SOA(ttl, pns, hostmaster, serial, t1, t2, t3, t4)
-    case RR_TXT(ttl, text) => PlainRR_TXT(ttl, text)
-    case _ => throw new IllegalArgumentException("unreachable")
-  }
+  def map_enhance_name(name: Name)(rr: RR): (Name,RR) = (name,rr)
 }
