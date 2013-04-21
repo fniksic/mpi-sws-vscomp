@@ -8,12 +8,20 @@ import java.util.Calendar
 import java.text.SimpleDateFormat
 import java.net.DatagramSocket
 import java.net.DatagramPacket
+import mpidns.data.BuildAnswerTree
+import mpidns.data.EmptyPlainTree
+import mpidns.data.PlainTree
+import mpidns.data.PlainRR
+import mpidns.data.Name
 
 object DNSServer {
 
   val BUFFER_SIZE = 65536; // 64kB UDP packet
   val PORT = 1024;
 
+  def ptbuild (pt: PlainTree, d: (String, PlainRR)): PlainTree =
+    d match { case (n, rr) => return  pt.addRR(new Name(n), rr) }
+    
   def main(args: Array[String]): Unit = {
 
     // startup DNS server
@@ -27,10 +35,13 @@ object DNSServer {
     // read given zone file
     val zone_records = ZoneFileReader.read(args(0))
     MSG("Zone file successfully parsed")
-    //TODO: apply semantic checks here first
     
-    //TODO: pre compute answer tree
-    val answer_tree = null
+    val plain_tree = zone_records.foldLeft(EmptyPlainTree: PlainTree)(ptbuild)
+    val answer_tree = BuildAnswerTree.build_answer_tree(plain_tree) match {
+      case Left(at) => at
+      case Right(err) => MSG("Error: bad zone file")
+      sys.exit() // TODO dump error messages
+    }
     // initiate resolver with given answer tree
     val resolver = new Resolver(answer_tree)
     
