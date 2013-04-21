@@ -1,6 +1,6 @@
 package mpidns.data
 
-class Question(
+case class Question(
   qname: Name,
   qtype: Either[RecordType, Unit],
   qclass: Int)

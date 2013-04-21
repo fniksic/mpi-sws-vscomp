@@ -1,6 +1,6 @@
 package mpidns.data
 
-sealed abstract class ResponseCode(id: Int)
+abstract class ResponseCode(val id: Int)
 
 case class NO_ERROR extends ResponseCode(0)
 case class FORMAT_ERROR extends ResponseCode(1)

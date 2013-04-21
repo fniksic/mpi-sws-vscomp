@@ -1,6 +1,6 @@
 package mpidns.data
 
-class Message(
+case class Message(
   header: Header,
   query: Array[Question],
   answers: Array[PlainRR],
