@@ -1,6 +1,6 @@
 package mpidns.data
 
-sealed abstract class RecordType(id: Int)
+sealed abstract class RecordType(val id: Int)
 
 case class A extends RecordType(1)
 case class NS extends RecordType(2)
