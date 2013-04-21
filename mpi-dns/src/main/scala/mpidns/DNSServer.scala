@@ -39,7 +39,10 @@ object DNSServer {
     val plain_tree = zone_records.foldLeft(EmptyPlainTree: PlainTree)(ptbuild)
     val answer_tree = BuildAnswerTree.build_answer_tree(plain_tree) match {
       case Left(at) => at
-      case Right(err) => MSG("Error: bad zone file")
+      case Right(err) => {
+        MSG("Error: bad zone file")
+        err.foreach({e => println(e.n)})
+      }
       sys.exit() // TODO dump error messages
     }
     // initiate resolver with given answer tree
@@ -51,7 +54,7 @@ object DNSServer {
     val query_packet = new DatagramPacket(query_buffer, BUFFER_SIZE)
 
     MSG("DNS Server now listing on port: " + PORT)
-    while (true) {      
+    /*while (true) {      
       // listen for incoming DNS queries
       sock.receive(query_packet)
       MSG("Request received from (" + query_packet.getAddress().toString.substring(1) + ")")
@@ -66,7 +69,7 @@ object DNSServer {
       response_packet.setSocketAddress(response_packet.getSocketAddress())
       sock.send(response_packet)
       MSG("Anwser sent back to (" + response_packet.getAddress().toString.substring(1) + ")")
-    }
+    }*/
   }
 
   // debugging only  
