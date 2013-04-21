@@ -1,6 +1,6 @@
 package mpidns.data
 
 case class Question(
-  qname: Name,
-  qtype: Either[RecordType, Unit],
-  qclass: Int)
+  val qname: Name,
+  val qtype: Either[RecordType, Unit],
+  val qclass: Int)

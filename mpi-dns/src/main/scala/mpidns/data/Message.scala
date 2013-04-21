@@ -1,8 +1,8 @@
 package mpidns.data
 
 case class Message(
-  header: Header,
-  query: Array[Question],
-  answers: Array[PlainRR],
-  authority: Array[PlainRR],
-  additional: Array[PlainRR])
+  val header: Header,
+  val query: Array[Question],
+  val answers: Array[(Name, RR)],
+  val authority: Array[(Name, RR)],
+  val additional: Array[(Name, RR)])
