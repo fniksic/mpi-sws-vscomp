@@ -88,14 +88,16 @@ object ZoneFileReader {
 
   private def parseDot(tokens: ListString): List[Tuple2[String, PlainRR]] = tokens match {
     case Cons(fqdn, Cons(ip, Cons(x, Cons(ttl, Nil())))) =>
-      List((fqdn, PlainRR_NS(TTL(ttl), new Name(x))), (fqdn, PlainRR_SOA(TTL(ttl), new Name(x), "hostermaster@" + fqdn, SERIAL, DEFAULT_REFRESH, DEFAULT_RETRY, DEFAULT_EXPIRE, DEFAULT_MINIMUM))) :::
+      List((fqdn, PlainRR_NS(TTL(ttl), new Name(x))), (fqdn, PlainRR_SOA(TTL(ttl), new Name(x), 
+    		  new Name("hostmaster" :: new Name(fqdn).fqdn), SERIAL, DEFAULT_REFRESH, DEFAULT_RETRY, DEFAULT_EXPIRE, DEFAULT_MINIMUM))) :::
         (if (!ip.isEmpty()) List((x, PlainRR_A(TTL(ttl), IP(ip)))) else List())
     case e => throw new IllegalArgumentException(e.toString)
   }
 
   private def parseZ(tokens: ListString): List[Tuple2[String, PlainRR]] = tokens match {
     case Cons(fqdn, Cons(pms, Cons(hm, Cons(serial, Cons(refresh, Cons(retry, Cons(expire, Cons(minimum, Cons(ttl, Nil()))))))))) =>
-      List((fqdn, PlainRR_SOA(TTL(ttl), new Name(pms), hm + "@" + fqdn, SERIAL, REFRESH(refresh), RETRY(retry), EXPIRE(expire), MINIMUM(minimum))))
+      List((fqdn, PlainRR_SOA(TTL(ttl), new Name(pms), 
+    		  new Name(hm :: new Name(fqdn).fqdn), SERIAL, REFRESH(refresh), RETRY(retry), EXPIRE(expire), MINIMUM(minimum))))
     case e => throw new IllegalArgumentException(e.toString)
   }
 
