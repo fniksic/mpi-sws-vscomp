@@ -189,7 +189,7 @@ sealed class AnswerTree(root: AnswerTreeNode) {
 
 }
 
-sealed abstract class Error(n: Name) {
+sealed abstract class Error(val n: Name) {
   val msg: String
 }
 
