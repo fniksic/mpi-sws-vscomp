@@ -206,3 +206,14 @@ Glue:
 Authoritative or glue only
 8. If R is of any type but SOA, F must be authoriative in A *or* there must be an NS
   record F': NS F in A.
+
+Re-formulation:
+1. A[F] must not contain two SOA records.
+2. If A[F] contains a CNAME, it must not contain other records.
+3. CNAMEs may not form loops
+4. If A[F] has an NS record pointing to N, N must either be non-authoritative,
+  or F[N] must have an A record.
+5. If A[F] has an MX record pointing to N, N must not have a CNAME record.
+6. If we have a node F that is not authoritative, then there must be an NS record
+  pointing to F.
+7. NS records can only be added in zones.
