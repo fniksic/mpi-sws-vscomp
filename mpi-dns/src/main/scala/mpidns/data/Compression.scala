@@ -4,11 +4,24 @@ object Compression {
   // TODO: Make sure these don't extend the message outside the limit
   def labelToBytes(x: String) = x.length().toByte +: x.getBytes()
 
-  def int16ToBytes(x: Int) = {
-    val firstByte = ((x & 0xff00) >> 8).toByte
-    val secondByte = (x & 0xff).toByte
-    Array(firstByte, secondByte)
-  }
+  def int16ToBytes(x: Int) =
+    Array(
+      ((x & 0xff00) >>> 8).toByte,
+      (x & 0xff).toByte)
+
+  def int32ToBytes(x: Int) =
+    Array(
+      ((x & 0xff000000) >>> 24).toByte,
+      ((x & 0xff0000) >>> 16).toByte,
+      ((x & 0xff00) >>> 8).toByte,
+      (x & 0xff).toByte)
+
+  def long32ToBytes(x: Long) =
+    Array(
+      ((x & 0xff000000L) >>> 24).toByte,
+      ((x & 0xff0000L) >>> 16).toByte,
+      ((x & 0xff00L) >>> 8).toByte,
+      (x & 0xffL).toByte)
 
   def pointerToBytes(pointer: Int) = {
     val tmp = int16ToBytes(pointer)
@@ -45,57 +58,68 @@ object Compression {
     }
   }
 
-  def addNameToForest(name: List[String], forest: List[SuffixTree], data: Array[Byte]) = addNameToForest_(name.reverse, forest, data, labelToBytes(""))
+  def addNameToForest(name: List[String])(forest: List[SuffixTree], data: Array[Byte]) = addNameToForest_(name.reverse, forest, data, labelToBytes(""))
+
+  def updateWithUnknownLength(forest: List[SuffixTree], data: Array[Byte], updateFunc: (List[SuffixTree], Array[Byte]) => (List[SuffixTree], Array[Byte])) = {
+    val dummyLengthBytes = Array(0.toByte, 0.toByte)
+    val dummyLengthPos = data.length
+    val (forestWithNewData, dataWithNewData) = updateFunc(forest, data)
+    val length = dataWithNewData.length - dummyLengthPos - 2
+    val lengthBytes = Compression.int16ToBytes(length)
+    dataWithNewData(dummyLengthPos) = lengthBytes(0)
+    dataWithNewData(dummyLengthPos + 1) = lengthBytes(1)
+    (forestWithNewData, dataWithNewData)
+  }
 
   def handleQuestion(accu: (List[SuffixTree], Array[Byte]), question: Question): (List[SuffixTree], Array[Byte]) = {
-  	val (forest, data) = accu
-  	val (newForest, newData) = addNameToForest(question.qname.fqdn, forest, data)
-  	val qtype = question.qtype match {
-  		case Left(recType) => recType.id
-  		case Right(_) => 255
-  	}
-  	(newForest, newData ++ int16ToBytes(qtype) ++ int16ToBytes(question.qclass))
-  }                                               //> handleQuestion: (accu: (List[mpidns.data.Compression.SuffixTree], Array[Byt
-                                                  //| e]), question: mpidns.data.Question)(List[mpidns.data.Compression.SuffixTre
-                                                  //| e], Array[Byte])
-  
+    val (forest, data) = accu
+    val (newForest, newData) = addNameToForest(question.qname.fqdn)(forest, data)
+    val qtype = question.qtype match {
+      case Left(recType) => recType.id
+      case Right(_) => 255
+    }
+    (newForest, newData ++ int16ToBytes(qtype) ++ int16ToBytes(question.qclass))
+  }
+
   def handleRR(accu: (List[SuffixTree], Array[Byte]), namedRR: (Name, RR)): (List[SuffixTree], Array[Byte]) = {
-  	val (forest, data) = accu
-  	
+    val (name, rr) = namedRR
+    val (forest, data) = accu
+    val (forestWithName, dataWithName) = addNameToForest(name.fqdn)(forest, data)
+    rr.compress(forestWithName, dataWithName)
   }
-		
+
   def messageToBytes(message: Message): Array[Byte] = {
-  	val header = headerToBytes(message.header)
-  	
-  	val (forestWithQuestions, dataWithQuestions) = message.query.foldLeft((List[SuffixTree](), header))(handleQuestion)
-  	val (forestWithAnswers, dataWithAnswers) = message.answers.foldLeft((forestWithQuestions, dataWithQuestions))(handleRR)
-  	val (forestWithAuthority, dataWithAuthority) = message.authority.foldLeft((forestWithAnswers, dataWithAnswers))(handleRR)
-  	val (forestWithAdditional, dataWithAdditional) = message.additional.foldLeft((forestWithAuthority, dataWithAuthority))(handleRR)
-  	
-  	dataWithAdditional
-  }                                               //> messageToBytes: (message: mpidns.data.Message)Array[Byte]
-    
-  def headerToBytes(header: Header) = {
-  	val idBytes = int16ToBytes(header.id)
-  	
-  	val response = if (header.response) 0x80 else 0x00
-  	val opCode = header.opCode << 4
-  	val authoritative = if (header.authoritative) 0x08 else 0x00
-  	val truncated = if (header.truncated) 0x04 else 0x00
-  	val recursionDesired = if (header.recursionDesired) 0x02 else 0x00
-  	val recursionAvailable = if (header.recursionAvailable) 0x01 else 0x00
-  	val bunchByte = (response | opCode | authoritative | truncated | recursionDesired | recursionAvailable).toByte
-  	
-  	val zero = header.zero << 4
-  	val rCode = header.rCode
-  	val zeroRCodeByte = (zero | rCode).toByte
-  	
-  	val questionCountBytes = int16ToBytes(header.questionCount)
-  	val answerCountBytes = int16ToBytes(header.answerCount)
-  	val authorityCountBytes = int16ToBytes(header.authorityCount)
-  	val additionalCountBytes = int16ToBytes(header.additionalCount)
-  	
-  	(idBytes :+ bunchByte :+ zeroRCodeByte) ++ questionCountBytes ++ answerCountBytes ++ authorityCountBytes ++ additionalCountBytes
+    val header = headerToBytes(message.header)
+
+    val (forestWithQuestions, dataWithQuestions) = message.query.foldLeft((List[SuffixTree](), header))(handleQuestion)
+    val (forestWithAnswers, dataWithAnswers) = message.answers.foldLeft((forestWithQuestions, dataWithQuestions))(handleRR)
+    val (forestWithAuthority, dataWithAuthority) = message.authority.foldLeft((forestWithAnswers, dataWithAnswers))(handleRR)
+    val (forestWithAdditional, dataWithAdditional) = message.additional.foldLeft((forestWithAuthority, dataWithAuthority))(handleRR)
+
+    dataWithAdditional
   }
-  
+
+  def headerToBytes(header: Header) = {
+    val idBytes = int16ToBytes(header.id)
+
+    val response = if (header.response) 0x80 else 0x00
+    val opCode = header.opCode << 4
+    val authoritative = if (header.authoritative) 0x08 else 0x00
+    val truncated = if (header.truncated) 0x04 else 0x00
+    val recursionDesired = if (header.recursionDesired) 0x02 else 0x00
+    val recursionAvailable = if (header.recursionAvailable) 0x01 else 0x00
+    val bunchByte = (response | opCode | authoritative | truncated | recursionDesired | recursionAvailable).toByte
+
+    val zero = header.zero << 4
+    val rCode = header.rCode
+    val zeroRCodeByte = (zero | rCode).toByte
+
+    val questionCountBytes = int16ToBytes(header.questionCount)
+    val answerCountBytes = int16ToBytes(header.answerCount)
+    val authorityCountBytes = int16ToBytes(header.authorityCount)
+    val additionalCountBytes = int16ToBytes(header.additionalCount)
+
+    (idBytes :+ bunchByte :+ zeroRCodeByte) ++ questionCountBytes ++ answerCountBytes ++ authorityCountBytes ++ additionalCountBytes
+  }
+
 }
