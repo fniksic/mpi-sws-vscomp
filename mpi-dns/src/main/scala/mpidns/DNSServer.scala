@@ -61,7 +61,7 @@ object DNSServer {
       MSG("Request received from (" + query_packet.getAddress().toString.substring(1) + ")")
       
       //TODO: decode query_buffer into query message
-      val query_msg = null
+      val query_msg = Compression.bytesToMessage(query_packet.getData())
       val response_msg = resolver.resolve(query_msg)
       
       //TODO: encode response message into response_buffer

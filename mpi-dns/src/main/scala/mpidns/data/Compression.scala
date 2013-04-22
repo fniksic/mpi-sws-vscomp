@@ -175,8 +175,44 @@ object Compression {
       questionCount, answerCount, authorityCount, additionalCount)
   }
 
+  def extractQuestion(data: Array[Byte], start: Int): (Question, Int) = {
+    val (qname, offsetAfterName) = extractName(data, start)
+    val qtypeNum = bytesToInt16(data.slice(offsetAfterName, offsetAfterName + 2))
+    val qtype = if (qtypeNum == 255) Right(()) else Left(RecordType withId qtypeNum)
+    val qclass = bytesToInt16(data.slice(offsetAfterName + 2, offsetAfterName + 4))
+    
+    (Question(new Name(qname), qtype, qclass), offsetAfterName + 4)
+  }
+  
+  def extractNQuestions_(data: Array[Byte], start: Int, n: Int, accu: List[Question]): (List[Question], Int) =
+    if (n == 0) (accu, start)
+    else {
+      val (question, offset) = extractQuestion(data, start)
+      extractNQuestions_(data, offset, n - 1, question :: accu)
+    }
+  
+  def extractNQuestions(data: Array[Byte], start: Int, n: Int) = {
+    val (questions, offset) = extractNQuestions_(data, start, n, List())
+    (questions.reverse, offset)
+  }
+  
+  def extractNRRs_(data: Array[Byte], start: Int, n: Int, accu: List[(Name, RR)]): (List[(Name, RR)], Int) = {
+    (List(), 0)
+  }
+  
+  def extractNRRs(data: Array[Byte], start: Int, n: Int) = {
+    val (rrs, offset) = extractNRRs_(data, start, n, List())
+    (rrs.reverse, offset)
+  }
+  
   def bytesToMessage(data: Array[Byte]): Message = {
     val header = bytesToHeader(data)
+    val (query, offsetAfterQuery) = extractNQuestions(data, 12, header.questionCount)
+    val (answers, offsetAfterAnswers) = extractNRRs(data, offsetAfterQuery, header.answerCount)
+    val (authority, offsetAfterAuthority) = extractNRRs(data, offsetAfterAnswers, header.authorityCount)
+    val (additional, offsetAfterAdditional) = extractNRRs(data, offsetAfterAuthority, header.additionalCount)
+    
+    Message(header, query.toArray, answers.toArray, authority.toArray, additional.toArray)
   }
 
 }
