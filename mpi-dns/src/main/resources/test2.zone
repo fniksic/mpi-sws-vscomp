@@ -1,0 +1,18 @@
+#vscomp.org domain
+.vscomp.org:10.0.0.1:ns.vscomp.org:
+&vscomp.org::ns.sri.com:
+
+#10.0.0. reverse names
+Z0.0.10.in-addr.arpa:ns.vscomp.org:hostmaster.vscomp.org:3:::::
+&0.0.10.in-addr.arpa::ns.vscomp.org:
+
+#some entries
+@vscomp.org::foo.vscomp.org:42:
+=foo.vscomp.org:10.0.0.1:300
++barf.vscomp.org:10.0.0.2:
+^2.0.0.10.in-addr.arpa:random.vscomp.org:
+^2.0.0.10.in-addr.arpa:barf.vscomp.org:50000
+
+#some more interesting entries
+'random.vscomp.org:verifying #software# is fun, isn't it? ;):
+Cbar.vscomp.org:foo.vscomp.org:
