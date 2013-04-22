@@ -23,9 +23,12 @@ object Compression {
       ((x & 0xff00L) >>> 8).toByte,
       (x & 0xffL).toByte)
 
-  def bytesToInt16(data: Array[Byte]) = data(0) << 8 | data(1)
-  def bytesToInt32(data: Array[Byte]) = data(0) << 24 | data(1) << 16 | data(2) << 8 | data(3)
-  def bytesToLong32(data: Array[Byte]) = data(0).toLong << 24 | data(1).toLong << 16 | data(2).toLong << 8 | data(3).toLong
+  def byteToInt(byte: Byte) = byte & 0xff
+  def byteToLong(byte: Byte) = byte & 0xffL
+  
+  def bytesToInt16(data: Array[Byte]) = byteToInt(data(0)) << 8 | byteToInt(data(1))
+  def bytesToInt32(data: Array[Byte]) = byteToInt(data(0)) << 24 | byteToInt(data(1)) << 16 | byteToInt(data(2)) << 8 | byteToInt(data(3))
+  def bytesToLong32(data: Array[Byte]) = byteToLong(data(0)) << 24 | byteToLong(data(1)) << 16 | byteToLong(data(2)) << 8 | byteToLong(data(3))
 
   def pointerToBytes(pointer: Int) = {
     val tmp = int16ToBytes(pointer)
@@ -128,7 +131,7 @@ object Compression {
 
   def isPointer(byte: Byte) = (byte & 0xc0) != 0
 
-  def getPointer(first: Byte, second: Byte) = first << 8 | second
+  def getPointer(first: Byte, second: Byte) = (first & 0x3f) << 8 | second
 
   def getLabelLength(byte: Byte) = byte & 0x3f
 
@@ -142,13 +145,16 @@ object Compression {
       else extractName_(data, pointer, accu, visited + pointer, newNext)
     } else {
       val labelLength = getLabelLength(data(start))
-      val newNext = next orElse Some(start + labelLength + 1)
+      val newNext = Some(start + labelLength + 1)
       if (labelLength == 0) (accu, newNext.get)
-      else extractName_(data, start + labelLength, extractLabel(data, start, labelLength) :: accu, visited, newNext)
+      else extractName_(data, start + labelLength + 1, extractLabel(data, start + 1, labelLength) :: accu, visited, newNext)
     }
   }
 
-  def extractName(data: Array[Byte], start: Int) = extractName_(data, start, List(), Set(), None)
+  def extractName(data: Array[Byte], start: Int) = {
+    val (name, offset) = extractName_(data, start, List(), Set(), None)
+    (name.reverse, offset)
+  }
 
   def bytesToHeader(data: Array[Byte]): Header = {
     val id = bytesToInt16(data.slice(0, 2))
@@ -177,6 +183,7 @@ object Compression {
 
   def extractQuestion(data: Array[Byte], start: Int): (Question, Int) = {
     val (qname, offsetAfterName) = extractName(data, start)
+    println(qname + " " + offsetAfterName)
     val qtypeNum = bytesToInt16(data.slice(offsetAfterName, offsetAfterName + 2))
     val qtype = if (qtypeNum == 255) Right(()) else Left(RecordType withId qtypeNum)
     val qclass = bytesToInt16(data.slice(offsetAfterName + 2, offsetAfterName + 4))
@@ -207,12 +214,13 @@ object Compression {
   
   def bytesToMessage(data: Array[Byte]): Message = {
     val header = bytesToHeader(data)
-    val (query, offsetAfterQuery) = extractNQuestions(data, 12, header.questionCount)
+    println(header)
+    val (questions, offsetAfterQuery) = extractNQuestions(data, 12, header.questionCount)
     val (answers, offsetAfterAnswers) = extractNRRs(data, offsetAfterQuery, header.answerCount)
     val (authority, offsetAfterAuthority) = extractNRRs(data, offsetAfterAnswers, header.authorityCount)
     val (additional, offsetAfterAdditional) = extractNRRs(data, offsetAfterAuthority, header.additionalCount)
     
-    Message(header, query.toArray, answers.toArray, authority.toArray, additional.toArray)
+    Message(header, questions.toArray, answers.toArray, authority.toArray, additional.toArray)
   }
 
 }

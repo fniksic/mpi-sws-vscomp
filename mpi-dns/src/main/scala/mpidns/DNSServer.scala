@@ -30,7 +30,7 @@ import mpidns.data.RR_CNAME
 object DNSServer {
 
   val BUFFER_SIZE = 65536; // 64kB UDP packet
-  val PORT = 1024;
+  val PORT = 2048;
 
   def ptbuild (pt: PlainTree, d: (String, PlainRR)): PlainTree =
     d match { case (n, rr) => return  pt.addRR(new Name(n), rr) }
@@ -121,10 +121,14 @@ object DNSServer {
       
       //TODO: decode query_buffer into query message
       val query_msg = Compression.bytesToMessage(query_packet.getData())
+      println(query_msg)
+      println(query_msg.query(0))
       val response_msg = resolver.resolve(query_msg)
+      println(response_msg)
       val response_buffer = Compression.messageToBytes(response_msg)
-      val response_packet = new DatagramPacket(response_buffer, BUFFER_SIZE)
-      response_packet.setSocketAddress(response_packet.getSocketAddress())
+      
+      val response_packet = new DatagramPacket(response_buffer, Math.min(BUFFER_SIZE, response_buffer.length))
+      response_packet.setSocketAddress(query_packet.getSocketAddress())
       sock.send(response_packet)
       MSG("Anwser sent back to (" + response_packet.getAddress().toString.substring(1) + ")")
     }
