@@ -32,6 +32,8 @@ import mpidns.data.AnswerTree
 import mpidns.data.AnswerTree
 import mpidns.data.AnswerTree
 import mpidns.data.Helpers
+import mpidns.data.RR_NS
+import mpidns.data.RR_NS
 
 class Resolver(ans_tree: AnswerTree) {
   
@@ -70,14 +72,14 @@ class Resolver(ans_tree: AnswerTree) {
           } else if (cnames.length == 1) {
             rtype match {
               case CNAME => {
-                state_.addAnswer(List((qname,cnames(0)))) // Case 1.1.2.2 CNAME
+                state_.addAnswer(List((qname, cnames(0)))) // Case 1.1.2.2 CNAME
               }
               case x => {
                 if (!wildcard) {
                   cnames(0) match {
-                    case RR_CNAME(ttl,fqdn,childs) => {
-                      val (cn, non_cn) = partition_cnames2((qname,cnames(0)) :: cnames(0).asInstanceOf[RR_CNAME].flatten_extra)
-                      state_.addAnswer(cn).addAnswer(filter_rrs2(non_cn,rtype)) // Case 1.1.2.1
+                    case RR_CNAME(ttl, fqdn, childs) => {
+                      val (cn, non_cn) = partition_cnames2((qname, cnames(0)) :: cnames(0).asInstanceOf[RR_CNAME].flatten_extra)
+                      state_.addAnswer(cn).addAnswer(filter_rrs2(non_cn, rtype)) // Case 1.1.2.1
                     }
                     case e => throw new IllegalArgumentException(e.toString)
                   }
@@ -89,16 +91,30 @@ class Resolver(ans_tree: AnswerTree) {
               }
             }
           } else {
-            throw new IllegalArgumentException("Multiple CNames")
+            throw new IllegalArgumentException("Multiple CNAME records")
           }
         }
-        case None => // Case 1.2 including Case 1.2.1 and Case 1.2.2
-        			state_.setResponseCode(NAME_ERROR)
+        case None => state_.setResponseCode(NAME_ERROR) // Case 1.2 including Case 1.2.1 and Case 1.2.2
       }
     } else { // DNS server is not authoritative for this qname
-      ans_tree.find_maximal_prefix_for(qname, Helpers.is_ns) match {
-        case Some(ns) =>
-      	case None => 
+      ans_tree.find_maximal_prefix(qname, Helpers.is_ns) match {
+        case Some(p) => { // Case 2.1
+          val auth_records = ans_tree.get_rrs(qname) match {
+            case Some(ns_rrs) => filter_rrs(ns_rrs, NS)
+            case None => throw new IllegalArgumentException("No NS records")
+          }
+          val state_ = state.addAuthority(auth_records.map(map_add_name(qname)))
+          auth_records.foldLeft(state_)({ (state, ns) =>
+            ns match {
+              case RR_NS(_, fqdn, _) => ans_tree.get_rrs(fqdn) match {
+                case Some(rrs) => state_.addAdditionals(filter_rrs(rrs, A).map(map_add_name(qname)))
+                case None => throw new IllegalArgumentException("Damn")
+              }
+              case _ => state_
+            }
+          })
+        }
+        case None => state // Case 2.2 
       }
     }
   }
