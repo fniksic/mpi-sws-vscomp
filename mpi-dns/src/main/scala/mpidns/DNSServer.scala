@@ -14,6 +14,18 @@ import mpidns.data.PlainTree
 import mpidns.data.PlainRR
 import mpidns.data.Name
 import mpidns.data.Compression
+import java.io.PrintWriter
+import java.io.FileWriter
+import mpidns.data.AnswerTreeNode
+import mpidns.data.RR
+import mpidns.data.RR_A
+import mpidns.data.RR_MX
+import mpidns.data.RR_NS
+import mpidns.data.RR_PTR
+import mpidns.data.RR_TXT
+import mpidns.data.RR_SOA
+import mpidns.data.RR_CNAME
+import mpidns.data.RR_CNAME
 
 object DNSServer {
 
@@ -23,6 +35,46 @@ object DNSServer {
   def ptbuild (pt: PlainTree, d: (String, PlainRR)): PlainTree =
     d match { case (n, rr) => return  pt.addRR(new Name(n), rr) }
     
+  var i = 0
+  def rr_to_dot (io: PrintWriter) (rr: RR): Unit = {
+    rr match {
+      case RR_A(_, a) => io.println("  n" + i + " [shape=none,label=\"A: " + a + "\"];")
+      case RR_MX(_, p, n) => 
+        io.println("  n" + i + " [shape=none,label=\"MX: " + n + "@" + p +  "\"];")
+      case RR_NS(_, n, a) => 
+        io.println("  n" + i + " [shape=none,label=\"NS: " + n + " " + a + "\"];")
+      case RR_PTR(_, n) =>
+        io.println("  n" + i + " [shape=none,label=\"PTR: " + n + "\"];")
+      case RR_TXT(_, n) =>
+        io.println("  n" + i + " [shape=none,label=\"TXT: " + n + "\"];")
+      case RR_SOA(_, dn, hm, s, t1, t2, t3, t4) =>
+        io.println("  n" + i + " [shape=none,label=\"SOA: " + dn + 
+            "; " + hm + ";" + s + ";" + t1 + ";" + t2 + ";" + t3 + ";" + t4  + "\"];")
+      case RR_CNAME(_, n, extra) =>
+        io.println("  n" + i + " [shape=none,label=\"CNAME: " + n + " " + 
+            rr.asInstanceOf[RR_CNAME].flatten_extra + "\"];")
+        
+    }
+  }
+  def at_to_dot (io: PrintWriter) (node: AnswerTreeNode): Unit = {
+    if (node.authoritative) {
+      io.println("  n" + i + " [shape=\"rectangle\"]")
+    }
+    val me: Int = i
+    for (rr <- node.rrs) {
+      i = i + 1
+      io.println("  n" + me + " -> n" + i + ";")
+      rr_to_dot(io)(rr)
+    }
+    for ((name, child) <- node.children) {
+      println("Handling " + name)
+      i = i + 1
+      io.println("  n" + me + " -> n" + i + ";")
+      io.println("  n" + i + " [label=\"" + name + "\"];")
+      at_to_dot(io)(child)
+    }
+  }
+  
   def main(args: Array[String]): Unit = {
 
     // startup DNS server
@@ -46,6 +98,13 @@ object DNSServer {
       }
       sys.exit() // TODO dump error messages
     }
+    val atwriter: PrintWriter = new PrintWriter(new FileWriter("answertree.dot"))
+    atwriter.println("digraph answertree {")
+    atwriter.println("  n0 [label=\".\"];")
+    at_to_dot(atwriter)(answer_tree.root)
+    atwriter.println("}")
+    atwriter.close()
+    
     // initiate resolver with given answer tree
     val resolver = new Resolver(answer_tree)
     
