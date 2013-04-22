@@ -99,6 +99,10 @@ sealed class AnswerTreeNode(Children: Map[String, AnswerTreeNode], Rrs: List[RR]
   val children = Children
   val rrs = Rrs
   val authoritative = Authoritative
+  
+  override def toString: String = {
+    children.keySet.toString + ";" + rrs + (if (authoritative) "+" else "-")
+  }
 }
 
 object Helpers {
@@ -127,7 +131,7 @@ object Helpers {
     case _ => return false
   }
 }
-sealed class AnswerTree(root: AnswerTreeNode) {
+sealed class AnswerTree(val root: AnswerTreeNode) {
   val node: AnswerTreeNode = root
 
   private def find_node_for(n: Name): Option[AnswerTreeNode] = {
@@ -139,6 +143,21 @@ sealed class AnswerTree(root: AnswerTreeNode) {
       }
     }
     return new Some(cn)
+  }
+
+  def find_maximal_prefix(n: Name, p: RR => Boolean): Option[Name] = {
+    var cn = node
+    var prefix: List[String] = List[String]()
+    var last_name: Option[Name] = 
+      if (cn.rrs.exists(p)) Some(new Name(prefix)) else None
+    for (ne <- n.fqdn.reverse) {
+      if (cn.rrs.exists(p)) last_name = Some(new Name(prefix))
+      cn.children.get(ne) match {
+        case None => return last_name
+        case Some(cn2) => cn = cn2
+      }
+    }
+    return last_name
   }
 
   private def find_maximal_prefix_for(n: Name, p: AnswerTreeNode => Boolean): Option[AnswerTreeNode] = {
@@ -339,48 +358,6 @@ object BuildAnswerTree {
     }
   }
 
-  class State(last_atn: Option[AnswerTreeNode], work: Stack[AnswerTreeNode]) {
-    def push(n: String, rr: List[RR], auth: Boolean): State = {
-      val new_node = new AnswerTreeNode(Map[String, AnswerTreeNode](), rr, auth)
-      if (!work.isEmpty) {
-        val whd = work.head
-        val wtl = work.tail
-        val new_hd = new AnswerTreeNode(whd.children + (n -> new_node), whd.rrs, whd.authoritative)
-        return new State(None, wtl.push(new_hd).push(new_node))
-      } else {
-        return new State(None, work.push(new_node))
-      }
-    }
-    def push(rr: List[RR], auth: Boolean): State = {
-      return new State(None, work.push(new AnswerTreeNode(Map[String, AnswerTreeNode](),
-          rr, auth)))
-    }
-    def pop: State = {
-      return new State(Some(work.head), work.tail)
-    }
-    def is_auth: Boolean = {
-      if (!work.isEmpty)
-        return work.head.authoritative
-      else
-        return false
-    }
-    val last = last_atn
-  }
-
-  def build_pre(rr_map: Map[Name, List[RR]])(s: State, pref: Stack[String], rrs: List[PlainRR]): State = {
-    val auth =
-      if (rrs.exists(Helpers.is_p_soa)) true
-      else if (rrs.exists(Helpers.is_p_ns)) false
-      else s.is_auth
-    if (pref.isEmpty)
-      return s.push(rr_map.get(new Name(pref.toList)).get, auth)
-    else
-      return s.push(pref.head, rr_map.get(new Name(pref.toList)).get, auth)
-  }
-
-  def build_post(s: State, pref: Stack[String], rrs: List[PlainRR]): State = {
-    return s.pop
-  }
 
   def rec_sat_cnames (map: Map[Name, List[RR]]) 
   	  (plainTree: PlainTree) (n: Name):
@@ -434,6 +411,58 @@ object BuildAnswerTree {
     return true
   }
 
+  class PartialNode(val auth: Boolean, val rr: List[RR],
+		val children: Map[String, AnswerTreeNode]) {
+    def this(auth1: Boolean, rr1: List[RR]) = 
+      this(auth1, rr1, Map[String, AnswerTreeNode]())
+    def add_child(name: String, node: AnswerTreeNode): PartialNode =
+      new PartialNode(auth, rr, children + (name -> node))
+    def to_answer_tree_node: AnswerTreeNode =
+      new AnswerTreeNode(children, rr, auth)
+  }
+  class State(nodes: Stack[PartialNode]) {
+    def this() =  this(Stack[PartialNode]())
+    def push(auth: Boolean, rr: List[RR]) =
+      new State(nodes.push(new PartialNode(auth, rr)))
+    def pop(n: String): State = {
+      assert(!nodes.isEmpty)
+      val an = nodes.head.to_answer_tree_node
+      val stack = nodes.tail
+      if (stack.isEmpty) {
+        return new State(stack)
+      } else {
+        val top = stack.head
+        val base = stack.tail
+        return new State(base.push(top.add_child(n, an)))
+      }
+    }
+    
+    def is_auth: Boolean = {
+      if (nodes.isEmpty) return false
+      return nodes.head.auth
+    }
+    
+    def get_root: AnswerTreeNode = {
+      println("Node stack: " + nodes)
+      assert(nodes.size == 1)
+      return nodes.head.to_answer_tree_node
+    }
+  }
+  
+  def build_pre(name_to_rr: Map[Name, List[RR]])
+  	(s: State, pref: Stack[String], rrs:List[PlainRR]): State = {
+    val rrs: List[RR] = name_to_rr.get(new Name(pref.toList)).getOrElse(List[RR]())
+    val auth = if (rrs.exists(Helpers.is_soa)) true
+    	       else if (rrs.exists(Helpers.is_ns)) false
+    	       else s.is_auth
+    return s.push(auth, rrs)
+  }
+  def build_post(s: State, pref: Stack[String], rrs:List[PlainRR]): State = {
+    if (pref.isEmpty)
+      return s
+    return s.pop(pref.head)
+  }
+  
   def build_answer_tree(plainTree: PlainTree): Either[AnswerTree, Set[Error]] = {
     /* iterate through the tree while checking invariants and collecting information. */
     /* 1. A[F] must not contain two SOA records.
@@ -474,7 +503,7 @@ object BuildAnswerTree {
      * (a -> b) in cnames <-> PT[a] has CNAME b
      * n in ns_pointess <-> there is an f s.t. PT[f] has NS n
      * n in mx_pointees <-> there is an f and a p s.t. PT[f] has MX p n
-     * err empty <-> PT satisfies 1, 2, 5 (TODO: make it also satisfy 7) 
+     * err empty <-> PT satisfies 1, 2, 5 
      */
     def errna (name: Name): Error = new ErrorNonauth(name)
     val na_mx_errs = mx_errs.union(outside.diff(ns_pointees).map(errna))
@@ -482,7 +511,7 @@ object BuildAnswerTree {
      * (a -> b) in cnames <-> PT[a] has CNAME b
      * n in ns_pointess <-> there is an f s.t. PT[f] has NS n
      * n in mx_pointees <-> there is an f and a p s.t. PT[f] has MX p n
-     * err empty <-> PT satisfies 1, 2, 5 (TODO: make it also satisfy 6, 7) 
+     * err empty <-> PT satisfies 1, 2, 5 
      */
     /* Collect NS information */
     def fold_ns(name: Name, data: Map[Name, List[PlainRR]]): Map[Name, List[PlainRR]] = {
@@ -507,7 +536,7 @@ object BuildAnswerTree {
      * n in ns_pointess <-> there is an f s.t. PT[f] has NS n
      * n in mx_pointees <-> there is an f and a p s.t. PT[f] has MX p n
      * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
-     * err empty <-> PT satisfies 1, 2, 5 (TODO: make it also satisfy 6, 7)
+     * err empty <-> PT satisfies 1, 2, 5
      * resolve_resule = None => PT satisfies 3
      * resolve_resuls = Some(x) => PT has CNAME loops 
      */
@@ -520,7 +549,7 @@ object BuildAnswerTree {
      * n in ns_pointess <-> there is an f s.t. PT[f] has NS n
      * n in mx_pointees <-> there is an f and a p s.t. PT[f] has MX p n
      * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
-     * err empty <-> PT satisfies 1, 2, 3, 5 (TODO: make it also satisfy 6, 7)
+     * err empty <-> PT satisfies 1, 2, 3, 5
      */    
     /* We have now checked 1, 2, 3, 5, 6 and 7. Checking 4 is easier on the final
      * answer tree, so build that now. Also, we ignore 4 for the time being.
@@ -531,7 +560,7 @@ object BuildAnswerTree {
     /* SPEC:
      * (a -> b) in cnames <-> PT[a] has CNAME b
      * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
-     * PT satisfies 1, 2, 3, 5 (TODO: make it also satisfy 6, 7)
+     * PT satisfies 1, 2, 3, 5
      */    
     /* Building the final tree, round 1: Build actual RRs. Start with
      * non-NS, non-CNAME; then, NS; then, CNAME */
@@ -542,7 +571,7 @@ object BuildAnswerTree {
     /* SPEC:
      * (a -> b) in cnames <-> PT[a] has CNAME b
      * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
-     * PT satisfies 1, 2, 3, 5 (TODO: make it also satisfy 6, 7)
+     * PT satisfies 1, 2, 3, 5
      * rrs_cname = { r: CNAME(t, n) | exists f, r in PT[f] }
      * rrs_ns = { r: NS(t, n) | exists f, r in PT[f] }
      * rrs_cname = { r | exists f, r in PT[f], r neither CNAME nor NS }
@@ -552,7 +581,7 @@ object BuildAnswerTree {
     /* SPEC:
      * (a -> b) in cnames <-> PT[a] has CNAME b
      * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
-     * PT satisfies 1, 2, 3, 5 (TODO: make it also satisfy 6, 7)
+     * PT satisfies 1, 2, 3, 5
      * rrs_cname = { r: CNAME(t, n) | exists f, r in PT[f] }
      * rrs_ns = { r: NS(t, n) | exists f, r in PT[f] }
      * rrs_other = { r | exists f, r in PT[f], r neither CNAME nor NS }
@@ -563,7 +592,7 @@ object BuildAnswerTree {
     /* SPEC:
      * (a -> b) in cnames <-> PT[a] has CNAME b
      * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
-     * PT satisfies 1, 2, 3, 5 (TODO: make it also satisfy 6, 7)
+     * PT satisfies 1, 2, 3, 5
      * rrs_cname = { r: CNAME(t, n) | exists f, r in PT[f] }
      * rrs_ns = { r: NS(t, n) | exists f, r in PT[f] }
      * rrs_other = { r | exists f, r in PT[f], r neither CNAME nor NS }
@@ -575,7 +604,7 @@ object BuildAnswerTree {
     /* SPEC:
      * (a -> b) in cnames <-> PT[a] has CNAME b
      * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
-     * PT satisfies 1, 2, 3, 5 (TODO: make it also satisfy 6, 7)
+     * PT satisfies 1, 2, 3, 5
      * rrs_cname = { r: CNAME(t, n) | exists f, r in PT[f] }
      * rrs_ns = { r: NS(t, n) | exists f, r in PT[f] }
      * rrs_other = { r | exists f, r in PT[f], r neither CNAME nor NS }
@@ -588,12 +617,11 @@ object BuildAnswerTree {
     /* SPEC:
      * (a -> b) in cnames <-> PT[a] has CNAME b
      * (n -> l) in ns_info <-> PT[n] has NS p, PT[p] = l 
-     * PT satisfies 1, 2, 3, 5 (TODO: make it also satisfy 6, 7)
+     * PT satisfies 1, 2, 3, 5
      * all_rrs_for_names = (Name -> RR^*)
      */        
     /* Finally, build the answer tree */
-    val state: State = new State(None, Stack[AnswerTreeNode]())
-    val final_state = plainTree.DFS(build_pre(all_rrs_for_names), build_post, state)
-    return new Left(new AnswerTree(final_state.last.get))
+    val final_state = plainTree.DFS(build_pre(all_rrs_for_names), build_post, new State())
+    return new Left(new AnswerTree(final_state.get_root))
   }    
 }
