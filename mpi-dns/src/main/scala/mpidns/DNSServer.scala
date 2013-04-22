@@ -63,8 +63,6 @@ object DNSServer {
       //TODO: decode query_buffer into query message
       val query_msg = null
       val response_msg = resolver.resolve(query_msg)
-      
-      //TODO: encode response message into response_buffer
       val response_buffer = Compression.messageToBytes(response_msg)
       val response_packet = new DatagramPacket(response_buffer, BUFFER_SIZE)
       response_packet.setSocketAddress(response_packet.getSocketAddress())
