@@ -23,6 +23,10 @@ object Compression {
       ((x & 0xff00L) >>> 8).toByte,
       (x & 0xffL).toByte)
 
+  def bytesToInt16(data: Array[Byte]) = data(0) << 8 | data(1)
+  def bytesToInt32(data: Array[Byte]) = data(0) << 24 | data(1) << 16 | data(2) << 8 | data(3)
+  def bytesToLong32(data: Array[Byte]) = data(0).toLong << 24 | data(1).toLong << 16 | data(2).toLong << 8 | data(3).toLong
+
   def pointerToBytes(pointer: Int) = {
     val tmp = int16ToBytes(pointer)
     Array((tmp(0) | 0xc0).toByte, tmp(1))
@@ -103,23 +107,23 @@ object Compression {
     val idBytes = int16ToBytes(header.id)
 
     val response = if (header.response) 0x80 else 0x00
-    val opCode = header.opCode << 4
-    val authoritative = if (header.authoritative) 0x08 else 0x00
-    val truncated = if (header.truncated) 0x04 else 0x00
-    val recursionDesired = if (header.recursionDesired) 0x02 else 0x00
-    val recursionAvailable = if (header.recursionAvailable) 0x01 else 0x00
-    val bunchByte = (response | opCode | authoritative | truncated | recursionDesired | recursionAvailable).toByte
+    val opCode = header.opCode << 3
+    val authoritative = if (header.authoritative) 0x04 else 0x00
+    val truncated = if (header.truncated) 0x02 else 0x00
+    val recursionDesired = if (header.recursionDesired) 0x01 else 0x00
+    val bunchByte = (response | opCode | authoritative | truncated | recursionDesired).toByte
 
+    val recursionAvailable = if (header.recursionAvailable) 0x80 else 0x00
     val zero = header.zero << 4
     val rCode = header.rCode
-    val zeroRCodeByte = (zero | rCode).toByte
+    val raZeroRCodeByte = (recursionAvailable | zero | rCode).toByte
 
     val questionCountBytes = int16ToBytes(header.questionCount)
     val answerCountBytes = int16ToBytes(header.answerCount)
     val authorityCountBytes = int16ToBytes(header.authorityCount)
     val additionalCountBytes = int16ToBytes(header.additionalCount)
 
-    (idBytes :+ bunchByte :+ zeroRCodeByte) ++ questionCountBytes ++ answerCountBytes ++ authorityCountBytes ++ additionalCountBytes
+    idBytes ++ Array(bunchByte, raZeroRCodeByte) ++ questionCountBytes ++ answerCountBytes ++ authorityCountBytes ++ additionalCountBytes
   }
 
   def isPointer(byte: Byte) = (byte & 0xc0) != 0
@@ -145,5 +149,34 @@ object Compression {
   }
 
   def extractName(data: Array[Byte], start: Int) = extractName_(data, start, List(), Set(), None)
+
+  def bytesToHeader(data: Array[Byte]): Header = {
+    val id = bytesToInt16(data.slice(0, 2))
+
+    val bunchByte = data(2)
+    val response = (bunchByte & 0x80) != 0
+    val opCode = (bunchByte & 0x78) >>> 3
+    val authoritative = (bunchByte & 0x04) != 0
+    val truncated = (bunchByte & 0x02) != 0
+    val recursionDesired = (bunchByte & 0x01) != 0
+
+    val raZeroRCodeByte = data(3)
+    val recursionAvailable = (raZeroRCodeByte & 0x80) != 0
+    val zero = (raZeroRCodeByte & 0x70) >>> 4
+    val rCode = raZeroRCodeByte & 0x0f
+
+    val questionCount = bytesToInt16(data.slice(4, 6))
+    val answerCount = bytesToInt16(data.slice(6, 8))
+    val authorityCount = bytesToInt16(data.slice(8, 10))
+    val additionalCount = bytesToInt16(data.slice(10, 12))
+
+    Header(id, response, opCode, authoritative, truncated, recursionDesired,
+      recursionAvailable, zero, rCode,
+      questionCount, answerCount, authorityCount, additionalCount)
+  }
+
+  def bytesToMessage(data: Array[Byte]): Message = {
+    val header = bytesToHeader(data)
+  }
 
 }
