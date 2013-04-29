@@ -3,16 +3,6 @@ package mpidns.data
 import java.net.InetAddress
 import scala.collection.immutable.Stack
 
-sealed abstract class PlainRR(ttl: Int)
-
-sealed case class PlainRR_NS(ttl: Int, fqdn: Name) extends PlainRR(ttl)
-sealed case class PlainRR_A(ttl: Int, addr: InetAddress) extends PlainRR(ttl)
-sealed case class PlainRR_SOA(ttl: Int, fqdn: Name, hostmaster: Name,
-    serial:Long, refresh: Int, retry: Int, expire: Int, minimum: Int) extends PlainRR(ttl)
-sealed case class PlainRR_PTR(ttl: Int, fqdn: Name) extends PlainRR(ttl)
-sealed case class PlainRR_MX(ttl: Int, prio: Int, fqdn: Name) extends PlainRR(ttl)
-sealed case class PlainRR_TXT(ttl: Int, text: String) extends PlainRR(ttl)
-sealed case class PlainRR_CNAME(ttl: Int, fqdn: Name) extends PlainRR(ttl)
 
 sealed class TreeNode(Children:Map[String, TreeNode], Rrs: List[PlainRR]) {
   val children = Children
@@ -20,25 +10,31 @@ sealed class TreeNode(Children:Map[String, TreeNode], Rrs: List[PlainRR]) {
 }
 
 sealed abstract class PlainTree {
+  def getRR(name: Name): Option[List[PlainRR]];
   def addRR(name: Name, rr: PlainRR): PlainTree;
-  def DFS[S](visitor: (S, Stack[String], List[PlainRR]) => S,
+  def dfs[S](visitor: (S, Stack[String], List[PlainRR]) => S,
       visitor2: (S, Stack[String], List[PlainRR]) => S,
       init: S): S;  
-  def getRR(name: Name): Option[List[PlainRR]];
-  def DFS[S](visitor: (S, Stack[String], List[PlainRR]) => S, init: S): S = {
+  def dfs[S](visitor: (S, Stack[String], List[PlainRR]) => S, init: S): S = {
     def id (s: S, p: Stack[String], r: List[PlainRR]) = s
-    return DFS(visitor, id, init)
+    return dfs(visitor, id, init)
   }
 }
 
 object PlainTreeHelpers {
-  def build_path(fqdn: List[String], rr: PlainRR): TreeNode = {
+  def buildPath(fqdn: List[String], rr: PlainRR): TreeNode = {
     var node = new TreeNode(Map(), List(rr))
     for (np <- fqdn) {
       node = new TreeNode(Map(np -> node), List())
     }
     return node
   }
+  
+  private def buildPlainTreeaddEntry (pt: PlainTree, d: (String, PlainRR)): PlainTree =
+    d match { case (n, rr) => return  pt.addRR(new Name(n), rr) }
+
+  def buildPlainTree (zone_records: List[(String, PlainRR)]): PlainTree =
+    zone_records.foldLeft(EmptyPlainTree: PlainTree)(buildPlainTreeaddEntry)
 }
 
 class NonemptyPlainTree(Root: TreeNode) extends PlainTree {
@@ -60,20 +56,20 @@ class NonemptyPlainTree(Root: TreeNode) extends PlainTree {
     })
   }
   
-  private def do_dfs[S](visitor: ((S, Stack[String], List[PlainRR]) => S),
+  private def doDfs[S](visitor: ((S, Stack[String], List[PlainRR]) => S),
       visitor2: ((S, Stack[String], List[PlainRR]) => S),
       pref: Stack[String], node: TreeNode, state: S): S = {
     var s= visitor(state, pref, node.rrs)
     for ((k, v) <- node.children) {
-      s = do_dfs(visitor, visitor2, pref.push(k), v, s)
+      s = doDfs(visitor, visitor2, pref.push(k), v, s)
     }
     return visitor2(s, pref, node.rrs)
   }
   
-  override def DFS[S](visitor: (S, Stack[String], List[PlainRR]) => S,
+  override def dfs[S](visitor: (S, Stack[String], List[PlainRR]) => S,
       visitor2: (S, Stack[String], List[PlainRR]) => S,
       init: S): S = {
-    return do_dfs(visitor, visitor2, Stack(), root, init)
+    return doDfs(visitor, visitor2, Stack(), root, init)
   }
   
   private def doAddRR(fqdn: List[String], node: TreeNode, rr: PlainRR): TreeNode = {
@@ -82,7 +78,7 @@ class NonemptyPlainTree(Root: TreeNode) extends PlainTree {
         return new TreeNode(node.children, rr :: node.rrs)
       case head :: tail =>
         val new_child = node.children.get(head) match {
-          case None => PlainTreeHelpers.build_path(fqdn.tail.reverse, rr)
+          case None => PlainTreeHelpers.buildPath(fqdn.tail.reverse, rr)
           case Some(child) => doAddRR(tail, child, rr)
         }
         return new TreeNode(node.children - head + (head -> new_child), node.rrs)
@@ -94,11 +90,11 @@ class NonemptyPlainTree(Root: TreeNode) extends PlainTree {
 }
 
 object EmptyPlainTree extends PlainTree {
-  override def DFS[S](visitor: (S, Stack[String], List[PlainRR]) => S,
+  override def dfs[S](visitor: (S, Stack[String], List[PlainRR]) => S,
       visitor2: (S, Stack[String], List[PlainRR]) => S, 
       init: S): S = init
   override def getRR(n: Name): Option[List[PlainRR]] = None
   override def addRR(name: Name, rr: PlainRR): PlainTree = {
-    return new NonemptyPlainTree(PlainTreeHelpers.build_path(name.fqdn, rr))
+    return new NonemptyPlainTree(PlainTreeHelpers.buildPath(name.fqdn, rr))
   }
 }

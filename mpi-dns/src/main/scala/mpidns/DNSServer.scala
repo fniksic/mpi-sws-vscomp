@@ -26,17 +26,15 @@ import mpidns.data.RR_TXT
 import mpidns.data.RR_SOA
 import mpidns.data.RR_CNAME
 import mpidns.data.RR_CNAME
+import mpidns.data.PlainTreeHelpers
 
 object DNSServer {
 
   val BUFFER_SIZE = 65536; // 64kB UDP packet
   val PORT = 2048;
 
-  def ptbuild (pt: PlainTree, d: (String, PlainRR)): PlainTree =
-    d match { case (n, rr) => return  pt.addRR(new Name(n), rr) }
-    
-  var i = 0
-  def rr_to_dot (io: PrintWriter) (rr: RR): Unit = {
+  private var i = 0
+  private def RRtoDOT (io: PrintWriter)(rr: RR): Unit = {
     rr match {
       case RR_A(_, a) => io.println("  n" + i + " [shape=none,label=\"A: " + a + "\"];")
       case RR_MX(_, p, n) => 
@@ -56,23 +54,32 @@ object DNSServer {
         
     }
   }
-  def at_to_dot (io: PrintWriter) (node: AnswerTreeNode): Unit = {
+  private def answerTreeToDOT (io: PrintWriter)(node: AnswerTreeNode): Unit = {
     if (node.authoritative) {
       io.println("  n" + i + " [shape=\"rectangle\"]")
     }
     val me: Int = i
-    for (rr <- node.rrs) {
+    for (rr <- node.rrs) yield {
       i = i + 1
       io.println("  n" + me + " -> n" + i + ";")
-      rr_to_dot(io)(rr)
+      RRtoDOT(io)(rr)
     }
     for ((name, child) <- node.children) {
       println("Handling " + name)
       i = i + 1
       io.println("  n" + me + " -> n" + i + ";")
       io.println("  n" + i + " [label=\"" + name + "\"];")
-      at_to_dot(io)(child)
+      answerTreeToDOT(io)(child)
     }
+  }
+  
+  private def dumpTreeToDOT(answer_tree: mpidns.data.AnswerTree): Unit = {
+    val atwriter: PrintWriter = new PrintWriter(new FileWriter("answertree.dot"))
+    atwriter.println("digraph answertree {")
+    atwriter.println("  n0 [label=\".\"];")
+    answerTreeToDOT(atwriter)(answer_tree.root)
+    atwriter.println("}")
+    atwriter.close()
   }
   
   def main(args: Array[String]): Unit = {
@@ -89,7 +96,7 @@ object DNSServer {
     val zone_records = ZoneFileReader.read(args(0))
     MSG("Zone file successfully parsed")
     
-    val plain_tree = zone_records.foldLeft(EmptyPlainTree: PlainTree)(ptbuild)
+    val plain_tree = PlainTreeHelpers.buildPlainTree(zone_records)
     val answer_tree = BuildAnswerTree.build_answer_tree(plain_tree) match {
       case Left(at) => at
       case Right(err) => {
@@ -98,12 +105,7 @@ object DNSServer {
       }
       sys.exit() // TODO dump error messages
     }
-    val atwriter: PrintWriter = new PrintWriter(new FileWriter("answertree.dot"))
-    atwriter.println("digraph answertree {")
-    atwriter.println("  n0 [label=\".\"];")
-    at_to_dot(atwriter)(answer_tree.root)
-    atwriter.println("}")
-    atwriter.close()
+    dumpTreeToDOT(answer_tree)
     
     // initiate resolver with given answer tree
     val resolver = new Resolver(answer_tree)
