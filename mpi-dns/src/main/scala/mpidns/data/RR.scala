@@ -32,6 +32,7 @@ case class RR_CNAME(ttl: Int, fqdn: Name, child_records: List[(Name, RR)]) exten
     val (superForest, superData) = super.compress(forest, data)
     Compression.updateWithUnknownLength(superForest, superData, Compression.addNameToForest(fqdn.fqdn))
   }
+
   def flatten_extra: List[(Name, RR)] = {
     def do_flatten(crs: List[(Name, RR)], cr: (Name, RR)): List[(Name, RR)] = {
       val (n, rr) = cr
@@ -49,18 +50,26 @@ case class RR_SOA(ttl: Int, fqdn: Name, hostmaster: Name, serial: Long,
   refresh: Int, retry: Int, expire: Int, minimum: Int) extends RR(ttl, SOA) {
   override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
     val (superForest, superData) = super.compress(forest, data)
-    val (forestWithMName, dataWithMName) =
-      Compression.updateWithUnknownLength(superForest, superData, Compression.addNameToForest(fqdn.fqdn))
-    val (forestWithRName, dataWithRName) =
-      Compression.updateWithUnknownLength(forestWithMName, dataWithMName, Compression.addNameToForest(hostmaster.fqdn))
+
+    val dummyLengthBytes = Array(0.toByte, 0.toByte)
+    val dummyLengthPos = superData.length
+
+    val (forestWithMName, dataWithMName) = Compression.addNameToForest(fqdn.fqdn)(superForest, superData ++ dummyLengthBytes)
+    val (forestWithRName, dataWithRName) = Compression.addNameToForest(hostmaster.fqdn)(forestWithMName, dataWithMName)
 
     val serialBytes = Compression.long32ToBytes(serial)
     val refreshBytes = Compression.int32ToBytes(refresh)
     val retryBytes = Compression.int32ToBytes(retry)
     val expireBytes = Compression.int32ToBytes(expire)
     val minimumBytes = Compression.int32ToBytes(minimum)
+    val finalData = dataWithRName ++ serialBytes ++ refreshBytes ++ retryBytes ++ expireBytes ++ minimumBytes
 
-    (forestWithRName, dataWithRName ++ serialBytes ++ refreshBytes ++ retryBytes ++ expireBytes ++ minimumBytes)
+    val length = finalData.length - dummyLengthPos - 2
+    val lengthBytes = Compression.int16ToBytes(length)
+    finalData(dummyLengthPos) = lengthBytes(0)
+    finalData(dummyLengthPos + 1) = lengthBytes(1)
+
+    (forestWithRName, finalData)
   }
 }
 
@@ -74,8 +83,17 @@ case class RR_PTR(ttl: Int, fqdn: Name) extends RR(ttl, PTR) {
 case class RR_MX(ttl: Int, prio: Int, fqdn: Name) extends RR(ttl, MX) {
   override def compress(forest: List[SuffixTree], data: Array[Byte]): (List[SuffixTree], Array[Byte]) = {
     val (superForest, superData) = super.compress(forest, data)
+
+    val dummyLengthBytes = Array(0.toByte, 0.toByte)
+    val dummyLengthPos = superData.length
     val preferenceBytes = Compression.int16ToBytes(prio)
-    Compression.updateWithUnknownLength(superForest, superData ++ preferenceBytes, Compression.addNameToForest(fqdn.fqdn))
+    val (finalForest, finalData) = Compression.addNameToForest(fqdn.fqdn)(superForest, superData ++ dummyLengthBytes ++ preferenceBytes)
+    val length = finalData.length - dummyLengthPos - 2
+    val lengthBytes = Compression.int16ToBytes(length)
+    finalData(dummyLengthPos) = lengthBytes(0)
+    finalData(dummyLengthPos + 1) = lengthBytes(1)
+
+    (finalForest, finalData)
   }
 }
 
@@ -92,11 +110,11 @@ case class RR_TXT(ttl: Int, text: String) extends RR(ttl, TXT) {
 
 sealed abstract class PlainRR(ttl: Int)
 
-sealed case class PlainRR_NS(ttl: Int, fqdn: Name) extends PlainRR(ttl)
-sealed case class PlainRR_A(ttl: Int, addr: InetAddress) extends PlainRR(ttl)
-sealed case class PlainRR_SOA(ttl: Int, fqdn: Name, hostmaster: Name,
+case class PlainRR_NS(ttl: Int, fqdn: Name) extends PlainRR(ttl)
+case class PlainRR_A(ttl: Int, addr: InetAddress) extends PlainRR(ttl)
+case class PlainRR_SOA(ttl: Int, fqdn: Name, hostmaster: Name,
   serial: Long, refresh: Int, retry: Int, expire: Int, minimum: Int) extends PlainRR(ttl)
-sealed case class PlainRR_PTR(ttl: Int, fqdn: Name) extends PlainRR(ttl)
-sealed case class PlainRR_MX(ttl: Int, prio: Int, fqdn: Name) extends PlainRR(ttl)
-sealed case class PlainRR_TXT(ttl: Int, text: String) extends PlainRR(ttl)
-sealed case class PlainRR_CNAME(ttl: Int, fqdn: Name) extends PlainRR(ttl)
+case class PlainRR_PTR(ttl: Int, fqdn: Name) extends PlainRR(ttl)
+case class PlainRR_MX(ttl: Int, prio: Int, fqdn: Name) extends PlainRR(ttl)
+case class PlainRR_TXT(ttl: Int, text: String) extends PlainRR(ttl)
+case class PlainRR_CNAME(ttl: Int, fqdn: Name) extends PlainRR(ttl)

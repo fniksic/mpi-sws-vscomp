@@ -9,7 +9,7 @@ import java.io.File
 object ZoneFileReader {
 
   private var file: File = _
-  private def SERIAL: Long = file.lastModified()
+  private def SERIAL: Long = file.lastModified() / 1000 // In seconds!
 
   private val DEFAULT_MINIMUM: Int = 2560
   private def MINIMUM(minimum: String): Int = minimum match {

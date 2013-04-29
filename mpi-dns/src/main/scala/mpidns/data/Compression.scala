@@ -43,7 +43,7 @@ object Compression {
   def newForest(name: List[String], data: Array[Byte], ending: Array[Byte]) = newForestAccu(name, List(), data, ending)
 
   def addNameToTree(reverseName: List[String], tree: SuffixTree, data: Array[Byte], ending: Array[Byte]) = reverseName match {
-    case List() => (tree, data, true)
+    case List() => (tree, data, false)
     case x :: xs => tree match {
       case SuffixTree(label, pointer, children) =>
         if (x == label) {
@@ -70,7 +70,7 @@ object Compression {
   def updateWithUnknownLength(forest: List[SuffixTree], data: Array[Byte], updateFunc: (List[SuffixTree], Array[Byte]) => (List[SuffixTree], Array[Byte])) = {
     val dummyLengthBytes = Array(0.toByte, 0.toByte)
     val dummyLengthPos = data.length
-    val (forestWithNewData, dataWithNewData) = updateFunc(forest, data)
+    val (forestWithNewData, dataWithNewData) = updateFunc(forest, data ++ dummyLengthBytes)
     val length = dataWithNewData.length - dummyLengthPos - 2
     val lengthBytes = Compression.int16ToBytes(length)
     dataWithNewData(dummyLengthPos) = lengthBytes(0)
@@ -183,7 +183,6 @@ object Compression {
 
   def extractQuestion(data: Array[Byte], start: Int): (Question, Int) = {
     val (qname, offsetAfterName) = extractName(data, start)
-    println(qname + " " + offsetAfterName)
     val qtypeNum = bytesToInt16(data.slice(offsetAfterName, offsetAfterName + 2))
     val qtype = if (qtypeNum == 255) Right(()) else Left(RecordType withId qtypeNum)
     val qclass = bytesToInt16(data.slice(offsetAfterName + 2, offsetAfterName + 4))
@@ -214,7 +213,6 @@ object Compression {
 
   def bytesToMessage(data: Array[Byte]): Message = {
     val header = bytesToHeader(data)
-    println(header)
     val (questions, offsetAfterQuery) = extractNQuestions(data, 12, header.questionCount)
     val (answers, offsetAfterAnswers) = extractNRRs(data, offsetAfterQuery, header.answerCount)
     val (authority, offsetAfterAuthority) = extractNRRs(data, offsetAfterAnswers, header.authorityCount)
