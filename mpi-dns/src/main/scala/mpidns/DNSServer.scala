@@ -34,27 +34,27 @@ object DNSServer {
   val PORT = 2048;
 
   private var i = 0
-  private def RRtoDOT (io: PrintWriter)(rr: RR): Unit = {
+  private def RRtoDOT(io: PrintWriter)(rr: RR): Unit = {
     rr match {
       case RR_A(_, a) => io.println("  n" + i + " [shape=none,label=\"A: " + a + "\"];")
-      case RR_MX(_, p, n) => 
-        io.println("  n" + i + " [shape=none,label=\"MX: " + n + "@" + p +  "\"];")
-      case RR_NS(_, n, a) => 
+      case RR_MX(_, p, n) =>
+        io.println("  n" + i + " [shape=none,label=\"MX: " + n + "@" + p + "\"];")
+      case RR_NS(_, n, a) =>
         io.println("  n" + i + " [shape=none,label=\"NS: " + n + " " + a + "\"];")
       case RR_PTR(_, n) =>
         io.println("  n" + i + " [shape=none,label=\"PTR: " + n + "\"];")
       case RR_TXT(_, n) =>
         io.println("  n" + i + " [shape=none,label=\"TXT: " + n + "\"];")
       case RR_SOA(_, dn, hm, s, t1, t2, t3, t4) =>
-        io.println("  n" + i + " [shape=none,label=\"SOA: " + dn + 
-            "; " + hm + ";" + s + ";" + t1 + ";" + t2 + ";" + t3 + ";" + t4  + "\"];")
+        io.println("  n" + i + " [shape=none,label=\"SOA: " + dn +
+          "; " + hm + ";" + s + ";" + t1 + ";" + t2 + ";" + t3 + ";" + t4 + "\"];")
       case RR_CNAME(_, n, extra) =>
-        io.println("  n" + i + " [shape=none,label=\"CNAME: " + n + " " + 
-            rr.asInstanceOf[RR_CNAME].flatten_extra + "\"];")
-        
+        io.println("  n" + i + " [shape=none,label=\"CNAME: " + n + " " +
+          rr.asInstanceOf[RR_CNAME].flatten_extra + "\"];")
+
     }
   }
-  private def answerTreeToDOT (io: PrintWriter)(node: AnswerTreeNode): Unit = {
+  private def answerTreeToDOT(io: PrintWriter)(node: AnswerTreeNode): Unit = {
     if (node.authoritative) {
       io.println("  n" + i + " [shape=\"rectangle\"]")
     }
@@ -72,7 +72,7 @@ object DNSServer {
       answerTreeToDOT(io)(child)
     }
   }
-  
+
   private def dumpTreeToDOT(answer_tree: mpidns.data.AnswerTree): Unit = {
     val atwriter: PrintWriter = new PrintWriter(new FileWriter("answertree.dot"))
     atwriter.println("digraph answertree {")
@@ -81,7 +81,7 @@ object DNSServer {
     atwriter.println("}")
     atwriter.close()
   }
-  
+
   def main(args: Array[String]): Unit = {
 
     // startup DNS server
@@ -95,40 +95,37 @@ object DNSServer {
     // read given zone file
     val zone_records = ZoneFileReader.read(args(0))
     MSG("Zone file successfully parsed")
-    
+
     val plain_tree = PlainTreeHelpers.buildPlainTree(zone_records)
     val answer_tree = BuildAnswerTree.build_answer_tree(plain_tree) match {
       case Left(at) => at
-      case Right(err) => {
-        MSG("Error: bad zone file")
-        err.foreach({e => println(e.n + ": " + e.msg)})
-      }
-      sys.exit() // TODO dump error messages
+      case Right(err) =>
+        {
+          MSG("Error: bad zone file")
+          err.foreach({ e => println(e.n + ": " + e.msg) })
+        }
+        sys.exit() // TODO dump error messages
     }
     dumpTreeToDOT(answer_tree)
-    
+
     // initiate resolver with given answer tree
     val resolver = new Resolver(answer_tree)
-    
+
     // start server
     val sock = new DatagramSocket(PORT)
     val query_buffer = new Array[Byte](BUFFER_SIZE)
     val query_packet = new DatagramPacket(query_buffer, BUFFER_SIZE)
 
     MSG("DNS Server now listing on port: " + PORT)
-    while (true) {      
+    while (true) {
       // listen for incoming DNS queries
       sock.receive(query_packet)
       MSG("Request received from (" + query_packet.getAddress().toString.substring(1) + ")")
-      
+
       //TODO: decode query_buffer into query message
       val query_msg = Compression.bytesToMessage(query_packet.getData())
-      println(query_msg)
-      println(query_msg.query(0))
       val response_msg = resolver.resolve(query_msg)
-      println(response_msg)
       val response_buffer = Compression.messageToBytes(response_msg)
-      
       val response_packet = new DatagramPacket(response_buffer, Math.min(BUFFER_SIZE, response_buffer.length))
       response_packet.setSocketAddress(query_packet.getSocketAddress())
       sock.send(response_packet)

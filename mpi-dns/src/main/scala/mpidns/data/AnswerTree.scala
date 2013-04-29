@@ -13,7 +13,6 @@ sealed class AnswerTreeNode(val children: Map[String, AnswerTreeNode], val rrs: 
   }
 }
 
-
 sealed class AnswerTree(val root: AnswerTreeNode) {
   val node: AnswerTreeNode = root
 
@@ -31,7 +30,7 @@ sealed class AnswerTree(val root: AnswerTreeNode) {
   def find_maximal_prefix(n: Name, p: RR => Boolean): Option[Name] = {
     var cn = node
     var prefix: List[String] = List[String]()
-    var last_name: Option[Name] = 
+    var last_name: Option[Name] =
       if (cn.rrs.exists(p)) Some(new Name(prefix)) else None
     for (ne <- n.fqdn.reverse) {
       if (cn.rrs.exists(p)) last_name = Some(new Name(prefix))

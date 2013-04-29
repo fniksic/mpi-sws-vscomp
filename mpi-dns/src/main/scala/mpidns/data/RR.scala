@@ -33,7 +33,7 @@ case class RR_CNAME(ttl: Int, fqdn: Name, child_records: List[(Name, RR)]) exten
     Compression.updateWithUnknownLength(superForest, superData, Compression.addNameToForest(fqdn.fqdn))
   }
   def flatten_extra: List[(Name, RR)] = {
-    def do_flatten (crs: List[(Name, RR)], cr: (Name, RR)): List[(Name, RR)] = {
+    def do_flatten(crs: List[(Name, RR)], cr: (Name, RR)): List[(Name, RR)] = {
       val (n, rr) = cr
       return (rr match {
         case RR_CNAME(_, _, extra) =>
@@ -95,7 +95,7 @@ sealed abstract class PlainRR(ttl: Int)
 sealed case class PlainRR_NS(ttl: Int, fqdn: Name) extends PlainRR(ttl)
 sealed case class PlainRR_A(ttl: Int, addr: InetAddress) extends PlainRR(ttl)
 sealed case class PlainRR_SOA(ttl: Int, fqdn: Name, hostmaster: Name,
-    serial:Long, refresh: Int, retry: Int, expire: Int, minimum: Int) extends PlainRR(ttl)
+  serial: Long, refresh: Int, retry: Int, expire: Int, minimum: Int) extends PlainRR(ttl)
 sealed case class PlainRR_PTR(ttl: Int, fqdn: Name) extends PlainRR(ttl)
 sealed case class PlainRR_MX(ttl: Int, prio: Int, fqdn: Name) extends PlainRR(ttl)
 sealed case class PlainRR_TXT(ttl: Int, text: String) extends PlainRR(ttl)
